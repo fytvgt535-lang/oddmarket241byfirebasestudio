@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt } from '../types';
-import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock } from 'lucide-react';
+import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder } from '../types';
+import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
 
 interface VendorDashboardProps {
@@ -12,10 +12,20 @@ interface VendorDashboardProps {
   myReports: HygieneReport[];
   sanctions: Sanction[];
   paymentPlan?: PaymentPlan;
+  products: Product[];
+  orders: ClientOrder[];
+  onAddProduct: (product: Omit<Product, 'id'>) => void;
+  onDeleteProduct: (id: string) => void;
+  onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
 }
 
-const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, myReports, sanctions, paymentPlan }) => {
+const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, myReports, sanctions, paymentPlan, products, orders, onAddProduct, onDeleteProduct, onUpdateOrderStatus }) => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'store'>('overview');
   const [aiTip, setAiTip] = useState<string | null>(null);
+  
+  // Product Form State
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [newProduct, setNewProduct] = useState({ name: '', price: '', unit: 'pièce', category: 'vivres' });
 
   useEffect(() => {
     // Generate AI tip on load
@@ -26,8 +36,44 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
     loadTip();
   }, [profile.id]);
 
+  const handleProductSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!myStall) return;
+    onAddProduct({
+        stallId: myStall.id,
+        name: newProduct.name,
+        price: Number(newProduct.price),
+        unit: newProduct.unit,
+        category: newProduct.category as any,
+        inStock: true
+    });
+    setNewProduct({ name: '', price: '', unit: 'pièce', category: 'vivres' });
+    setIsAddProductOpen(false);
+  };
+
+  const myOrders = orders.filter(o => o.stallId === myStall?.id).sort((a,b) => b.date - a.date);
+  const myProducts = products.filter(p => p.stallId === myStall?.id);
+
   return (
     <div className="space-y-6">
+      {/* Navigation Tabs */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2 flex gap-2">
+        <button 
+            onClick={() => setActiveTab('overview')}
+            className={`flex-1 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors ${activeTab === 'overview' ? 'bg-green-50 text-green-700' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+            <User className="w-4 h-4" /> Mon Espace
+        </button>
+        <button 
+            onClick={() => setActiveTab('store')}
+            className={`flex-1 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors ${activeTab === 'store' ? 'bg-purple-50 text-purple-700' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+            <ShoppingBag className="w-4 h-4" /> Ma Boutique
+        </button>
+      </div>
+
+      {activeTab === 'overview' && (
+      <>
       {/* AI Coach Banner */}
       {aiTip && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg flex items-start gap-4 animate-fade-in">
@@ -169,8 +215,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                         </div>
                         <div>
                           <p className="font-bold text-gray-800 text-sm">Paiement Loyer</p>
-                          <p className="text-[10px] text-gray-500 font-mono flex items-center gap-1">
-                              {new Date(receipt.date).toLocaleDateString()} • <Lock className="w-3 h-3"/> {receipt.hash.substring(0,6)}...
+                          <p className="text-xs text-gray-500 font-mono flex items-center gap-1">
+                              {new Date(receipt.date).toLocaleDateString() • <Lock className="w-3 h-3"/> {receipt.hash.substring(0,6)}...}
                           </p>
                         </div>
                       </div>
@@ -184,6 +230,137 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
           </div>
         </div>
       </div>
+      </>
+      )}
+
+      {/* --- STOREFRONT TAB --- */}
+      {activeTab === 'store' && (
+        <div className="space-y-6 animate-fade-in">
+            {/* Orders Section */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <Package className="w-5 h-5 text-orange-600"/> Commandes Clients (Click & Collect)
+                </h3>
+                <div className="divide-y divide-gray-100">
+                    {myOrders.length === 0 ? (
+                        <p className="text-center text-gray-400 py-6">Aucune commande en attente.</p>
+                    ) : (
+                        myOrders.map(order => (
+                            <div key={order.id} className="py-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className={`px-2 py-0.5 text-xs font-bold rounded uppercase ${order.status === 'paid' ? 'bg-yellow-100 text-yellow-700' : order.status === 'picked_up' ? 'bg-green-100 text-green-700' : 'bg-gray-100'}`}>
+                                            {order.status === 'paid' ? 'Payé - À Préparer' : 'Livré'}
+                                        </span>
+                                        <span className="text-xs text-gray-400 font-mono">#{order.id.slice(-6)}</span>
+                                    </div>
+                                    <p className="font-bold text-gray-800">{order.customerName} ({order.customerPhone})</p>
+                                    <p className="text-sm text-gray-600">
+                                        {order.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+                                    </p>
+                                </div>
+                                <div className="text-right flex items-center gap-4">
+                                    <div className="text-right">
+                                        <p className="font-bold text-green-600">{order.totalAmount.toLocaleString()} FCFA</p>
+                                        <p className="text-xs text-gray-400 capitalize">{order.paymentProvider} Money</p>
+                                    </div>
+                                    {order.status === 'paid' && (
+                                        <button 
+                                            onClick={() => onUpdateOrderStatus(order.id, 'picked_up')}
+                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg"
+                                        >
+                                            Marquer Livré
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {/* Products Section */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                        <ShoppingBag className="w-5 h-5 text-purple-600"/> Mes Produits
+                    </h3>
+                    <button 
+                        onClick={() => setIsAddProductOpen(true)}
+                        className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-sm"
+                    >
+                        <Plus className="w-4 h-4"/> Ajouter Produit
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {myProducts.map(product => (
+                        <div key={product.id} className="border border-gray-200 rounded-lg p-4 flex justify-between items-center bg-gray-50">
+                            <div>
+                                <p className="font-bold text-gray-800">{product.name}</p>
+                                <p className="text-sm text-gray-600">{product.price.toLocaleString()} FCFA / {product.unit}</p>
+                                <span className="text-[10px] uppercase text-gray-400 font-bold">{product.category}</span>
+                            </div>
+                            <button 
+                                onClick={() => onDeleteProduct(product.id)}
+                                className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
+                            >
+                                <Trash2 className="w-4 h-4"/>
+                            </button>
+                        </div>
+                    ))}
+                    {myProducts.length === 0 && (
+                        <div className="col-span-full text-center py-8 border-2 border-dashed border-gray-200 rounded-lg text-gray-400">
+                            Votre vitrine est vide. Ajoutez des produits pour vendre en ligne.
+                        </div>
+                    )}
+                </div>
+
+                {/* Add Product Modal */}
+                {isAddProductOpen && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+                            <h3 className="font-bold text-lg mb-4">Nouveau Produit</h3>
+                            <form onSubmit={handleProductSubmit} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700">Nom du produit</label>
+                                    <input required type="text" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full p-2 border rounded"/>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700">Prix (FCFA)</label>
+                                        <input required type="number" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full p-2 border rounded"/>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700">Unité</label>
+                                        <select value={newProduct.unit} onChange={e => setNewProduct({...newProduct, unit: e.target.value})} className="w-full p-2 border rounded">
+                                            <option value="pièce">Pièce</option>
+                                            <option value="kg">Kg</option>
+                                            <option value="tas">Tas</option>
+                                            <option value="litre">Litre</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700">Catégorie</label>
+                                    <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full p-2 border rounded">
+                                        <option value="vivres">Vivres</option>
+                                        <option value="textile">Textile</option>
+                                        <option value="electronique">Électronique</option>
+                                        <option value="divers">Divers</option>
+                                    </select>
+                                </div>
+                                <div className="flex gap-2 pt-2">
+                                    <button type="button" onClick={() => setIsAddProductOpen(false)} className="flex-1 py-2 text-gray-600">Annuler</button>
+                                    <button type="submit" className="flex-1 py-2 bg-purple-600 text-white rounded font-bold">Ajouter</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+      )}
     </div>
   );
 };

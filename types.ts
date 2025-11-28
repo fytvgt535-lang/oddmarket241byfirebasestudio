@@ -198,6 +198,31 @@ export interface Transaction {
   collectedBy?: string; // Agent ID if cash
 }
 
+// --- E-COMMERCE / PRODUCT ---
+export interface Product {
+  id: string;
+  stallId: string;
+  name: string;
+  price: number;
+  unit: string; // kg, paquet, pièce
+  imageUrl?: string;
+  inStock: boolean;
+  category: ProductType;
+}
+
+export interface ClientOrder {
+  id: string;
+  stallId: string;
+  customerName: string;
+  customerPhone: string;
+  items: { productId: string; name: string; quantity: number; price: number }[];
+  totalAmount: number;
+  status: 'pending' | 'paid' | 'picked_up';
+  date: number;
+  paymentProvider: 'orange' | 'airtel' | 'momo';
+  paymentRef: string;
+}
+
 export interface VendorProfile {
   id: string;
   name: string;

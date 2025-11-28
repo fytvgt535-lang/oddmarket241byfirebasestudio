@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Stall, HygieneReport, Transaction, Market, Agent, Expense, SmsCampaign, PaymentPlan, SmsTemplate, Receipt } from '../types';
 import { generateMarketAnalysis, analyzeLocationWithMaps, MapsAnalysisResult } from '../services/geminiService';
 import StallDigitalTwin from './StallDigitalTwin';
-import { Sparkles, AlertTriangle, Wallet, Users, Activity, TrendingUp, Building2, MessageSquare, Send, DollarSign, FileText, HeartHandshake, Gavel, CheckCircle, Search, Map as MapIcon, Filter, AlertCircle, Trash2, Droplets, Bug, Radar, Archive, Lock, MapPin, ExternalLink, ShieldCheck, Settings, Plus, Pencil, Trash, X } from 'lucide-react';
+import { Sparkles, AlertTriangle, Wallet, Users, Activity, TrendingUp, Building2, MessageSquare, Send, DollarSign, FileText, HeartHandshake, Gavel, CheckCircle, Search, Map as MapIcon, Filter, AlertCircle, Trash2, Droplets, Bug, Radar, Archive, Lock, MapPin, ExternalLink, ShieldCheck, Settings, Plus, Pencil, Trash, X, Download } from 'lucide-react';
 
 interface AdminDashboardProps {
   markets: Market[];
@@ -206,6 +206,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, report
     const result = await analyzeLocationWithMaps(lat, lng, context);
     setGeoAnalysis(result);
     setIsGeoAnalyzing(false);
+  };
+
+  // CSV EXPORT HANDLER
+  const handleExportCSV = (data: any[], filename: string) => {
+      if (!data || !data.length) return;
+      
+      const headers = Object.keys(data[0]);
+      const csvContent = [
+          headers.join(','),
+          ...data.map(row => headers.map(fieldName => {
+              const val = row[fieldName];
+              return typeof val === 'string' ? `"${val.replace(/"/g, '""')}"` : val;
+          }).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${filename}_${new Date().toISOString().slice(0,10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
 
   // MARKET MANAGEMENT HANDLERS
@@ -802,7 +826,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, report
         <div className="space-y-6 animate-fade-in">
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 md:col-span-2">
-                 <h3 className="font-bold text-gray-800 mb-6">Balance Budgétaire (Net)</h3>
+                 <div className="flex justify-between items-start mb-6">
+                    <h3 className="font-bold text-gray-800">Balance Budgétaire (Net)</h3>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => handleExportCSV(filteredTransactions, 'transactions')}
+                            className="text-xs flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded border border-green-200 hover:bg-green-100"
+                        >
+                            <Download className="w-3 h-3"/> Export Recettes
+                        </button>
+                        <button 
+                            onClick={() => handleExportCSV(filteredExpenses, 'depenses')}
+                            className="text-xs flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded border border-red-200 hover:bg-red-100"
+                        >
+                            <Download className="w-3 h-3"/> Export Dépenses
+                        </button>
+                    </div>
+                 </div>
+                 
                  <div className="flex items-center gap-8">
                     <div>
                         <p className="text-sm text-gray-500">Recettes</p>

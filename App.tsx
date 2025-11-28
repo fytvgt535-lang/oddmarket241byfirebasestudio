@@ -1,13 +1,14 @@
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Store, Flag, Menu, X, LogOut, Phone, Users, UserCircle, Briefcase, Scan } from 'lucide-react';
+import { LayoutDashboard, Store, Flag, Menu, X, LogOut, Phone, Users, UserCircle, Briefcase, Scan, ShoppingBag } from 'lucide-react';
 import MarketMap from './components/MarketMap';
 import HygieneReportForm from './components/HygieneReport';
 import AdminDashboard from './components/AdminDashboard';
 import VendorDashboard from './components/VendorDashboard';
 import AgentFieldTool from './components/AgentFieldTool';
 import USSDSimulator from './components/USSDSimulator';
-import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt } from './types';
+import PublicMarketplace from './components/PublicMarketplace';
+import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt, Product, ClientOrder } from './types';
 import { t } from './services/translations';
 
 // --- MOCK DATA GENERATION ---
@@ -178,9 +179,12 @@ const INITIAL_SANCTIONS: Sanction[] = [
     { id: 's1', vendorId: MOCK_VENDOR.id, marketId: 'm1', type: 'warning', reason: 'Encombrement allée centrale', date: Date.now() - 86400000 * 3, status: 'active', issuedBy: 'a1' }
 ];
 
+const INITIAL_PRODUCTS: Product[] = [];
+const INITIAL_ORDERS: ClientOrder[] = [];
+
 const App: React.FC = () => {
   const [role, setRole] = useState<AppRole | null>(null);
-  const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool'>('map');
+  const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool' | 'marketplace'>('map');
   const [language, setLanguage] = useState<Language>('fr');
   const [showUSSD, setShowUSSD] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -195,6 +199,8 @@ const App: React.FC = () => {
   const [paymentPlans, setPaymentPlans] = useState<PaymentPlan[]>(INITIAL_PLANS);
   const [sanctions, setSanctions] = useState<Sanction[]>(INITIAL_SANCTIONS);
   const [agents, setAgents] = useState<Agent[]>(AGENTS);
+  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [orders, setOrders] = useState<ClientOrder[]>(INITIAL_ORDERS);
   
   const [userProfile, setUserProfile] = useState<VendorProfile>(MOCK_VENDOR);
   
@@ -391,6 +397,30 @@ const App: React.FC = () => {
       setPaymentPlans(prev => prev.map(p => p.id === planId ? { ...p, status: 'active' } : p));
   };
 
+  // --- PRODUCT & ORDER HANDLERS ---
+  const handleAddProduct = (product: Omit<Product, 'id'>) => {
+    const newProd: Product = { ...product, id: `prod-${Date.now()}` };
+    setProducts(prev => [...prev, newProd]);
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    setProducts(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleCreateOrder = (orderData: Omit<ClientOrder, 'id' | 'date' | 'status'>) => {
+    const newOrder: ClientOrder = {
+        ...orderData,
+        id: `ORD-${Math.random().toString(36).substr(2,5).toUpperCase()}`,
+        date: Date.now(),
+        status: 'paid' // Simulated immediate payment
+    };
+    setOrders(prev => [newOrder, ...prev]);
+  };
+
+  const handleUpdateOrderStatus = (orderId: string, status: ClientOrder['status']) => {
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+  };
+
   // Role Selection Screen (Landing)
   if (!role) {
     return (
@@ -404,6 +434,15 @@ const App: React.FC = () => {
             
             <div className="grid grid-cols-1 gap-4">
               <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Accès Public :</p>
+              
+              <button onClick={() => { setRole('guest'); setCurrentView('marketplace'); }} className="w-full p-4 rounded-xl border-2 border-slate-100 hover:border-slate-500 hover:bg-slate-50 transition-all flex items-center gap-4 group">
+                <div className="bg-slate-100 p-3 rounded-full text-slate-600 group-hover:bg-slate-600 group-hover:text-white transition-colors"><ShoppingBag /></div>
+                <div className="text-left"><h3 className="font-bold text-gray-800">Vitrine Citoyenne</h3><p className="text-xs text-gray-500">Rechercher Produits & Vendeurs</p></div>
+              </button>
+
+              <div className="my-2 h-px bg-gray-100"></div>
+
+              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Espace Connecté :</p>
               
               <button onClick={() => { setRole('vendor'); setCurrentView('map'); }} className="w-full p-4 rounded-xl border-2 border-green-100 hover:border-green-500 hover:bg-green-50 transition-all flex items-center gap-4 group">
                 <div className="bg-green-100 p-3 rounded-full text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors"><Store /></div>
@@ -446,6 +485,19 @@ const App: React.FC = () => {
         {showUSSD && <USSDSimulator onClose={() => setShowUSSD(false)} />}
       </div>
     );
+  }
+
+  // PUBLIC MARKETPLACE LAYOUT (NO AUTH)
+  if (role === 'guest' && currentView === 'marketplace') {
+      return (
+          <PublicMarketplace 
+            stalls={stalls} 
+            markets={markets} 
+            products={products}
+            onBack={() => { setRole(null); setCurrentView('map'); }}
+            onCreateOrder={handleCreateOrder}
+          />
+      );
   }
 
   // Authenticated Layout
@@ -575,6 +627,11 @@ const App: React.FC = () => {
              myReports={reports}
              sanctions={sanctions.filter(s => s.vendorId === userProfile.id)}
              paymentPlan={paymentPlans.find(p => p.vendorId === userProfile.id)}
+             products={products}
+             orders={orders}
+             onAddProduct={handleAddProduct}
+             onDeleteProduct={handleDeleteProduct}
+             onUpdateOrderStatus={handleUpdateOrderStatus}
           />
         )}
 
