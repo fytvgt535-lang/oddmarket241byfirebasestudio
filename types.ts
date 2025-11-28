@@ -7,6 +7,18 @@ export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'guest';
 // --- NEW: STALL HEALTH STATUS ---
 export type StallHealth = 'healthy' | 'warning' | 'critical';
 
+// --- NEW: NOTIFICATION SYSTEM ---
+export interface AppNotification {
+  id: string;
+  recipientRole: 'admin' | 'vendor' | 'agent';
+  recipientId?: string; // If specific vendor
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  date: number;
+  read: boolean;
+}
+
 export interface Market {
   id: string;
   name: string;
@@ -52,6 +64,7 @@ export interface PaymentPlan {
   startDate: number;
   status: 'active' | 'completed' | 'defaulted';
   progress: number; // 0-100
+  installmentsList?: { month: number; status: 'paid' | 'pending'; dueDate: number }[];
 }
 
 export interface Sanction {

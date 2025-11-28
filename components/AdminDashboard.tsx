@@ -1,10 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, ComposedChart, Area, ScatterChart, Scatter, ZAxis } from 'recharts';
-import { Stall, HygieneReport, Transaction, Market, Agent, Expense, SmsCampaign, PaymentPlan, SmsTemplate, Receipt } from '../types';
+import { Stall, HygieneReport, Transaction, Market, Agent, Expense, SmsCampaign, PaymentPlan, SmsTemplate, Receipt, AppNotification } from '../types';
 import { generateMarketAnalysis, analyzeLocationWithMaps, MapsAnalysisResult } from '../services/geminiService';
 import StallDigitalTwin from './StallDigitalTwin';
-import { Sparkles, AlertTriangle, Wallet, Users, Activity, TrendingUp, Building2, MessageSquare, Send, DollarSign, FileText, HeartHandshake, Gavel, CheckCircle, Search, Map as MapIcon, Filter, AlertCircle, Trash2, Droplets, Bug, Radar, Archive, Lock, MapPin, ExternalLink, ShieldCheck, Settings, Plus, Pencil, Trash, X, Download } from 'lucide-react';
+import { Sparkles, AlertTriangle, Wallet, Users, Activity, TrendingUp, Building2, MessageSquare, Send, DollarSign, FileText, HeartHandshake, Gavel, CheckCircle, Search, Map as MapIcon, Filter, AlertCircle, Trash2, Droplets, Bug, Radar, Archive, Lock, MapPin, ExternalLink, ShieldCheck, Settings, Plus, Pencil, Trash, X, Download, Bell } from 'lucide-react';
 
 interface AdminDashboardProps {
   markets: Market[];
@@ -15,6 +15,7 @@ interface AdminDashboardProps {
   agents: Agent[];
   expenses: Expense[];
   paymentPlans: PaymentPlan[];
+  notifications: AppNotification[];
   onSendSms: (marketId: string, audience: SmsCampaign['targetAudience'], message: string, tone: SmsTemplate['tone']) => void;
   onApprovePlan: (planId: string) => void;
   onAddMarket: (market: Omit<Market, 'id'>) => void;
@@ -28,11 +29,12 @@ const SMS_TEMPLATES: SmsTemplate[] = [
   { id: 't3', tone: 'urgent', label: 'Alerte Sanitaire', content: "ALERTE: Désinfection du marché prévue demain à 06h00. Veuillez impérativement couvrir vos marchandises." },
 ];
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, reports, transactions, receipts, agents, expenses, paymentPlans, onSendSms, onApprovePlan, onAddMarket, onUpdateMarket, onDeleteMarket }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, reports, transactions, receipts, agents, expenses, paymentPlans, notifications, onSendSms, onApprovePlan, onAddMarket, onUpdateMarket, onDeleteMarket }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'comms' | 'social' | 'geo' | 'markets'>('overview');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('all');
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   
   // Search & Stall Twin State
   const [stallSearch, setStallSearch] = useState('');
@@ -72,6 +74,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, report
   const collectionRate = Math.round((totalRevenue / potentialRevenue) * 100) || 0;
   
   const suspiciousStalls = filteredStalls.filter(s => s.status === 'occupied' && (!s.lastPaymentDate || Date.now() - s.lastPaymentDate > 30 * 24 * 60 * 60 * 1000));
+  const unreadNotifs = notifications.filter(n => !n.read).length;
 
   // Dynamic Audience Calculation
   const getAudienceCount = (audience: SmsCampaign['targetAudience']) => {
@@ -264,7 +267,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, report
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Notifications Panel */}
+      {showNotifications && (
+         <div className="absolute top-16 right-4 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-fade-in">
+             <div className="bg-gray-50 p-3 border-b border-gray-100 flex justify-between items-center">
+                 <h4 className="font-bold text-gray-800">Alertes Temps Réel</h4>
+                 <button onClick={() => setShowNotifications(false)}><X className="w-4 h-4 text-gray-400"/></button>
+             </div>
+             <div className="max-h-64 overflow-y-auto">
+                 {notifications.length === 0 ? (
+                     <p className="text-center p-4 text-gray-400 text-sm">Aucune nouvelle alerte.</p>
+                 ) : (
+                     notifications.map(n => (
+                         <div key={n.id} className="p-3 border-b border-gray-100 hover:bg-gray-50">
+                             <div className="flex justify-between items-start mb-1">
+                                 <span className={`text-xs font-bold px-1.5 py-0.5 rounded capitalize ${n.type === 'success' ? 'bg-green-100 text-green-700' : n.type === 'warning' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{n.type}</span>
+                                 <span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleTimeString()}</span>
+                             </div>
+                             <p className="font-bold text-sm text-gray-800">{n.title}</p>
+                             <p className="text-xs text-gray-500">{n.message}</p>
+                         </div>
+                     ))
+                 )}
+             </div>
+         </div>
+      )}
+
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
         <div>
@@ -275,11 +304,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ markets, stalls, report
           <p className="text-sm text-gray-500">Mairie de Libreville • Gouvernance Intelligente</p>
         </div>
         
-        <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto">
-            <button onClick={() => setSelectedMarketId('all')} className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap ${selectedMarketId === 'all' ? 'bg-white shadow-sm' : 'text-gray-500'}`}>Ville Globale</button>
-            {markets.map(m => (
-                <button key={m.id} onClick={() => setSelectedMarketId(m.id)} className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap ${selectedMarketId === m.id ? 'bg-white shadow-sm' : 'text-gray-500'}`}>{m.name}</button>
-            ))}
+        <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="flex bg-gray-100 p-1 rounded-lg flex-1 md:flex-none overflow-x-auto">
+                <button onClick={() => setSelectedMarketId('all')} className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap ${selectedMarketId === 'all' ? 'bg-white shadow-sm' : 'text-gray-500'}`}>Ville Globale</button>
+                {markets.map(m => (
+                    <button key={m.id} onClick={() => setSelectedMarketId(m.id)} className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap ${selectedMarketId === m.id ? 'bg-white shadow-sm' : 'text-gray-500'}`}>{m.name}</button>
+                ))}
+            </div>
+            
+            <button 
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 relative"
+            >
+                <Bell className="w-5 h-5 text-gray-600"/>
+                {unreadNotifs > 0 && (
+                    <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                )}
+            </button>
         </div>
       </div>
 

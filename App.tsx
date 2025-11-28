@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Store, Flag, Menu, X, LogOut, Phone, Users, UserCircle, Briefcase, Scan, ShoppingBag } from 'lucide-react';
 import MarketMap from './components/MarketMap';
 import HygieneReportForm from './components/HygieneReport';
@@ -8,7 +8,7 @@ import VendorDashboard from './components/VendorDashboard';
 import AgentFieldTool from './components/AgentFieldTool';
 import USSDSimulator from './components/USSDSimulator';
 import PublicMarketplace from './components/PublicMarketplace';
-import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt, Product, ClientOrder } from './types';
+import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt, Product, ClientOrder, AppNotification } from './types';
 import { t } from './services/translations';
 
 // --- MOCK DATA GENERATION ---
@@ -63,52 +63,51 @@ const generateMessages = (): StallMessage[] => [
     { id: 'm2', direction: 'inbound', content: 'D\'accord, je passe au bureau demain.', date: Date.now() - 86400000 * 4, read: true },
 ];
 
+const getRandomCoords = (baseLat: number, baseLng: number, spread: number) => {
+    return {
+        lat: baseLat + (Math.random() - 0.5) * spread,
+        lng: baseLng + (Math.random() - 0.5) * spread
+    };
+};
+
+const createStall = (i: number, marketId: string, prefix: string, basePrice: number, zone: string): Stall => {
+  const isOccupied = Math.random() > 0.3;
+  const isUnpaid = isOccupied && Math.random() > 0.8;
+  const documents = generateDocuments();
+  const hasDocIssue = documents.some(d => d.status === 'expired');
+  
+  // Determine Health Status
+  let health: StallHealth = 'healthy';
+  if (isUnpaid || hasDocIssue) health = 'warning';
+  if (isUnpaid && Math.random() > 0.5) health = 'critical'; // Simulating severe debt
+  
+  // Base coords for Mont-Bouet approx
+  const coords = getRandomCoords(0.3920, 9.4540, 0.0030);
+
+  return {
+      id: `${marketId}-s${i}`, marketId, number: `${prefix}-${i + 1}`,
+      zone,
+      price: basePrice,
+      status: isOccupied ? 'occupied' : 'free',
+      size: 'M', productType: 'vivres',
+      surfaceArea: 10,
+      lastPaymentDate: isUnpaid ? Date.now() - 45 * 24 * 60 * 60 * 1000 : Date.now(),
+      occupantName: isOccupied ? `Vendeur ${prefix} ${i+1}` : undefined,
+      occupantPhone: '07 55 44 33',
+      documents,
+      employees: generateEmployees(),
+      activityLog: generateActivity(),
+      messages: isOccupied ? generateMessages() : [],
+      complianceScore: health === 'critical' ? 45 : health === 'warning' ? 70 : 95,
+      healthStatus: health,
+      isPriority: Math.random() > 0.9,
+      coordinates: coords // Injected coordinates
+  };
+};
+
 const generateStalls = (): Stall[] => {
   let stalls: Stall[] = [];
   
-  // Helper to randomize coordinates around a center point (Lat/Lng for Libreville area)
-  const getRandomCoords = (baseLat: number, baseLng: number, spread: number) => {
-      return {
-          lat: baseLat + (Math.random() - 0.5) * spread,
-          lng: baseLng + (Math.random() - 0.5) * spread
-      };
-  };
-
-  const createStall = (i: number, marketId: string, prefix: string, basePrice: number, zone: string): Stall => {
-    const isOccupied = Math.random() > 0.3;
-    const isUnpaid = isOccupied && Math.random() > 0.8;
-    const documents = generateDocuments();
-    const hasDocIssue = documents.some(d => d.status === 'expired');
-    
-    // Determine Health Status
-    let health: StallHealth = 'healthy';
-    if (isUnpaid || hasDocIssue) health = 'warning';
-    if (isUnpaid && Math.random() > 0.5) health = 'critical'; // Simulating severe debt
-    
-    // Base coords for Mont-Bouet approx
-    const coords = getRandomCoords(0.3920, 9.4540, 0.0030);
-
-    return {
-        id: `${marketId}-s${i}`, marketId, number: `${prefix}-${i + 1}`,
-        zone,
-        price: basePrice,
-        status: isOccupied ? 'occupied' : 'free',
-        size: 'M', productType: 'vivres',
-        surfaceArea: 10,
-        lastPaymentDate: isUnpaid ? Date.now() - 45 * 24 * 60 * 60 * 1000 : Date.now(),
-        occupantName: isOccupied ? `Vendeur ${prefix} ${i+1}` : undefined,
-        occupantPhone: '07 55 44 33',
-        documents,
-        employees: generateEmployees(),
-        activityLog: generateActivity(),
-        messages: isOccupied ? generateMessages() : [],
-        complianceScore: health === 'critical' ? 45 : health === 'warning' ? 70 : 95,
-        healthStatus: health,
-        isPriority: Math.random() > 0.9,
-        coordinates: coords // Injected coordinates
-    };
-  };
-
   // Mont-Bouët
   stalls = stalls.concat(Array.from({ length: 50 }, (_, i) => 
     createStall(i, 'm1', 'MB', 35000, i < 20 ? 'Zone Vivres' : 'Zone Textile')
@@ -171,7 +170,7 @@ const MOCK_VENDOR: VendorProfile = {
 };
 
 const INITIAL_PLANS: PaymentPlan[] = [
-    { id: 'p1', vendorId: 'v_random', stallNumber: 'MB-12', totalDebt: 105000, installments: 3, amountPerMonth: 35000, startDate: Date.now(), status: 'active', progress: 33 },
+    { id: 'p1', vendorId: 'v_random', stallNumber: 'MB-12', totalDebt: 105000, installments: 3, amountPerMonth: 35000, startDate: Date.now(), status: 'active', progress: 33, installmentsList: [{month:1, status:'paid', dueDate: Date.now()-86400000}, {month:2, status:'pending', dueDate: Date.now()+86400000*30}] },
     { id: 'p2', vendorId: 'v_random2', stallNumber: 'AK-5', totalDebt: 45000, installments: 2, amountPerMonth: 22500, startDate: Date.now(), status: 'active', progress: 0 },
 ];
 
@@ -182,6 +181,12 @@ const INITIAL_SANCTIONS: Sanction[] = [
 const INITIAL_PRODUCTS: Product[] = [];
 const INITIAL_ORDERS: ClientOrder[] = [];
 
+// Helper for local storage
+const loadState = <T,>(key: string, fallback: T): T => {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : fallback;
+};
+
 const App: React.FC = () => {
   const [role, setRole] = useState<AppRole | null>(null);
   const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool' | 'marketplace'>('map');
@@ -189,31 +194,70 @@ const App: React.FC = () => {
   const [showUSSD, setShowUSSD] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
-  // App Data
-  const [markets, setMarkets] = useState<Market[]>(INITIAL_MARKETS);
-  const [stalls, setStalls] = useState<Stall[]>(INITIAL_STALLS);
-  const [reports, setReports] = useState<HygieneReport[]>(INITIAL_REPORTS);
-  const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
-  const [receipts, setReceipts] = useState<Receipt[]>(INITIAL_RECEIPTS);
-  const [expenses, setExpenses] = useState<Expense[]>(MOCK_EXPENSES);
-  const [paymentPlans, setPaymentPlans] = useState<PaymentPlan[]>(INITIAL_PLANS);
-  const [sanctions, setSanctions] = useState<Sanction[]>(INITIAL_SANCTIONS);
-  const [agents, setAgents] = useState<Agent[]>(AGENTS);
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [orders, setOrders] = useState<ClientOrder[]>(INITIAL_ORDERS);
+  // App Data with Persistence
+  const [markets, setMarkets] = useState<Market[]>(() => loadState('markets', INITIAL_MARKETS));
+  const [stalls, setStalls] = useState<Stall[]>(() => loadState('stalls', INITIAL_STALLS));
+  const [reports, setReports] = useState<HygieneReport[]>(() => loadState('reports', INITIAL_REPORTS));
+  const [transactions, setTransactions] = useState<Transaction[]>(() => loadState('transactions', INITIAL_TRANSACTIONS));
+  const [receipts, setReceipts] = useState<Receipt[]>(() => loadState('receipts', INITIAL_RECEIPTS));
+  const [expenses, setExpenses] = useState<Expense[]>(() => loadState('expenses', MOCK_EXPENSES));
+  const [paymentPlans, setPaymentPlans] = useState<PaymentPlan[]>(() => loadState('paymentPlans', INITIAL_PLANS));
+  const [sanctions, setSanctions] = useState<Sanction[]>(() => loadState('sanctions', INITIAL_SANCTIONS));
+  const [agents, setAgents] = useState<Agent[]>(() => loadState('agents', AGENTS));
+  const [products, setProducts] = useState<Product[]>(() => loadState('products', INITIAL_PRODUCTS));
+  const [orders, setOrders] = useState<ClientOrder[]>(() => loadState('orders', INITIAL_ORDERS));
   
-  const [userProfile, setUserProfile] = useState<VendorProfile>(MOCK_VENDOR);
+  const [userProfile, setUserProfile] = useState<VendorProfile>(() => loadState('userProfile', MOCK_VENDOR));
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => loadState('notifications', []));
   
+  // Persist State Effects
+  useEffect(() => localStorage.setItem('markets', JSON.stringify(markets)), [markets]);
+  useEffect(() => localStorage.setItem('stalls', JSON.stringify(stalls)), [stalls]);
+  useEffect(() => localStorage.setItem('reports', JSON.stringify(reports)), [reports]);
+  useEffect(() => localStorage.setItem('transactions', JSON.stringify(transactions)), [transactions]);
+  useEffect(() => localStorage.setItem('receipts', JSON.stringify(receipts)), [receipts]);
+  useEffect(() => localStorage.setItem('expenses', JSON.stringify(expenses)), [expenses]);
+  useEffect(() => localStorage.setItem('paymentPlans', JSON.stringify(paymentPlans)), [paymentPlans]);
+  useEffect(() => localStorage.setItem('sanctions', JSON.stringify(sanctions)), [sanctions]);
+  useEffect(() => localStorage.setItem('agents', JSON.stringify(agents)), [agents]);
+  useEffect(() => localStorage.setItem('products', JSON.stringify(products)), [products]);
+  useEffect(() => localStorage.setItem('orders', JSON.stringify(orders)), [orders]);
+  useEffect(() => localStorage.setItem('notifications', JSON.stringify(notifications)), [notifications]);
+
   // If role is Vendor, we assume they are in Mont-Bouët (m1) by default for the map view
   const activeMarketId = 'm1'; 
 
+  const addNotification = (notif: Omit<AppNotification, 'id' | 'date' | 'read'>) => {
+    const newNotif: AppNotification = {
+      ...notif,
+      id: `NOT-${Date.now()}`,
+      date: Date.now(),
+      read: false
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+  };
+
   // Market Management Handlers
   const handleAddMarket = (marketData: Omit<Market, 'id'>) => {
+    const newId = `m-${Date.now()}`;
     const newMarket: Market = {
       ...marketData,
-      id: `m-${Date.now()}`
+      id: newId
     };
     setMarkets(prev => [...prev, newMarket]);
+
+    // Auto-generate some empty stalls for this new market so the map isn't blank
+    const newStalls = Array.from({ length: 10 }, (_, i) => 
+        createStall(i, newId, newMarket.name.substring(0, 2).toUpperCase(), 25000, 'Zone Nouvelle')
+    );
+    setStalls(prev => [...prev, ...newStalls]);
+    
+    addNotification({
+        recipientRole: 'admin',
+        title: 'Nouveau Marché Créé',
+        message: `${newMarket.name} a été ajouté avec 10 étals vides générés.`,
+        type: 'success'
+    });
   };
 
   const handleUpdateMarket = (marketId: string, updates: Partial<Market>) => {
@@ -258,6 +302,14 @@ const App: React.FC = () => {
     };
     setTransactions(prev => [...prev, newTx]);
     setUserProfile(prev => ({ ...prev, stallId }));
+    
+    addNotification({
+        recipientRole: 'admin',
+        title: 'Nouvelle Réservation',
+        message: `${userProfile.name} a réservé l'étal ${stall.number}.`,
+        type: 'info'
+    });
+    
     setCurrentView('profile');
   };
 
@@ -287,8 +339,6 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, newTx]);
 
     // 3. SECURE LOGGING & CASH UPDATE
-    // Use the coordinates passed from the agent's device
-    
     const hash = `SHA256-${Math.random().toString(36).substr(2, 8).toUpperCase()}-${Date.now()}`;
 
     const newLog: AgentLog = {
@@ -319,9 +369,17 @@ const App: React.FC = () => {
         agentId: 'a1',
         marketId: stall.marketId,
         hash: hash,
-        gpsCoordinates: gpsCoordinates // Ensure this specific GPS is on the receipt
+        gpsCoordinates: gpsCoordinates
     };
     setReceipts(prev => [newReceipt, ...prev]);
+
+    // Notify Admin
+    addNotification({
+        recipientRole: 'admin',
+        title: 'Encaissement Terrain',
+        message: `Agent a1 a collecté ${amount} FCFA sur l'étal ${stall.number}.`,
+        type: 'success'
+    });
   };
 
   const handleIssueSanction = (stallId: string, type: 'warning' | 'fine', reason: string, evidenceUrl?: string) => {
@@ -360,6 +418,13 @@ const App: React.FC = () => {
       setAgents(prev => prev.map(a => 
         a.id === 'a1' ? { ...a, logs: [...a.logs, newLog] } : a
       ));
+
+      addNotification({
+        recipientRole: 'admin',
+        title: 'Sanction Émise',
+        message: `Sanction type ${type} sur étal ${stall?.number}.`,
+        type: 'warning'
+      });
   };
 
   const handleShiftAction = (action: 'start' | 'end' | 'deposit') => {
@@ -387,14 +452,33 @@ const App: React.FC = () => {
 
   const handleSendSms = (marketId: string, audience: SmsCampaign['targetAudience'], message: string, tone: any) => {
     console.log(`Sending ${tone} SMS to ${audience} in ${marketId}: ${message}`);
+    addNotification({
+        recipientRole: 'admin',
+        title: 'Campagne SMS Envoyée',
+        message: `Message envoyé à l'audience ${audience}.`,
+        type: 'info'
+    });
   };
 
   const handleReportSubmit = (reportData: any) => {
     setReports(prev => [{ ...reportData, id: `R-${Date.now()}`, marketId: 'm1', timestamp: Date.now(), status: 'pending' }, ...prev]);
+    addNotification({
+        recipientRole: 'admin',
+        title: 'Signalement Hygiène',
+        message: `Nouveau signalement reçu : ${reportData.category}.`,
+        type: 'warning'
+    });
   };
 
   const handleApprovePlan = (planId: string) => {
       setPaymentPlans(prev => prev.map(p => p.id === planId ? { ...p, status: 'active' } : p));
+      addNotification({
+        recipientRole: 'vendor',
+        recipientId: userProfile.id, // Only relevant if user is vendor
+        title: 'Plan de Paiement Validé',
+        message: 'Votre échéancier a été accepté par la mairie.',
+        type: 'success'
+      });
   };
 
   // --- PRODUCT & ORDER HANDLERS ---
@@ -415,6 +499,14 @@ const App: React.FC = () => {
         status: 'paid' // Simulated immediate payment
     };
     setOrders(prev => [newOrder, ...prev]);
+    
+    // Notify the vendor (assuming we are the vendor for the demo if stall matches)
+    addNotification({
+        recipientRole: 'vendor',
+        title: 'Nouvelle Commande !',
+        message: `Commande de ${orderData.totalAmount} FCFA reçue.`,
+        type: 'success'
+    });
   };
 
   const handleUpdateOrderStatus = (orderId: string, status: ClientOrder['status']) => {
@@ -629,6 +721,7 @@ const App: React.FC = () => {
              paymentPlan={paymentPlans.find(p => p.vendorId === userProfile.id)}
              products={products}
              orders={orders}
+             notifications={notifications.filter(n => n.recipientRole === 'vendor')}
              onAddProduct={handleAddProduct}
              onDeleteProduct={handleDeleteProduct}
              onUpdateOrderStatus={handleUpdateOrderStatus}
@@ -651,6 +744,7 @@ const App: React.FC = () => {
             agents={AGENTS}
             expenses={expenses}
             paymentPlans={paymentPlans}
+            notifications={notifications.filter(n => n.recipientRole === 'admin')}
             onSendSms={handleSendSms}
             onApprovePlan={handleApprovePlan}
             onAddMarket={handleAddMarket}

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder } from '../types';
-import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package } from 'lucide-react';
+import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
+import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
 
 interface VendorDashboardProps {
@@ -14,14 +14,16 @@ interface VendorDashboardProps {
   paymentPlan?: PaymentPlan;
   products: Product[];
   orders: ClientOrder[];
+  notifications: AppNotification[];
   onAddProduct: (product: Omit<Product, 'id'>) => void;
   onDeleteProduct: (id: string) => void;
   onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
 }
 
-const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, myReports, sanctions, paymentPlan, products, orders, onAddProduct, onDeleteProduct, onUpdateOrderStatus }) => {
+const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, myReports, sanctions, paymentPlan, products, orders, notifications, onAddProduct, onDeleteProduct, onUpdateOrderStatus }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'store'>('overview');
   const [aiTip, setAiTip] = useState<string | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
   
   // Product Form State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -53,11 +55,38 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
 
   const myOrders = orders.filter(o => o.stallId === myStall?.id).sort((a,b) => b.date - a.date);
   const myProducts = products.filter(p => p.stallId === myStall?.id);
+  const unreadNotifs = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="space-y-6">
-      {/* Navigation Tabs */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2 flex gap-2">
+    <div className="space-y-6 relative">
+      {/* Notifications Panel */}
+      {showNotifications && (
+         <div className="absolute top-12 right-0 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-fade-in">
+             <div className="bg-gray-50 p-3 border-b border-gray-100 flex justify-between items-center">
+                 <h4 className="font-bold text-gray-800">Notifications</h4>
+                 <button onClick={() => setShowNotifications(false)}><X className="w-4 h-4 text-gray-400"/></button>
+             </div>
+             <div className="max-h-64 overflow-y-auto">
+                 {notifications.length === 0 ? (
+                     <p className="text-center p-4 text-gray-400 text-sm">Aucune notification.</p>
+                 ) : (
+                     notifications.map(n => (
+                         <div key={n.id} className="p-3 border-b border-gray-100 hover:bg-gray-50">
+                             <div className="flex justify-between items-start mb-1">
+                                 <span className={`text-xs font-bold px-1.5 py-0.5 rounded capitalize ${n.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{n.type}</span>
+                                 <span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleTimeString()}</span>
+                             </div>
+                             <p className="font-bold text-sm text-gray-800">{n.title}</p>
+                             <p className="text-xs text-gray-500">{n.message}</p>
+                         </div>
+                     ))
+                 )}
+             </div>
+         </div>
+      )}
+
+      {/* Navigation Tabs & Notification Bell */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2 flex gap-2 items-center">
         <button 
             onClick={() => setActiveTab('overview')}
             className={`flex-1 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors ${activeTab === 'overview' ? 'bg-green-50 text-green-700' : 'text-gray-500 hover:bg-gray-50'}`}
@@ -69,6 +98,18 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
             className={`flex-1 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors ${activeTab === 'store' ? 'bg-purple-50 text-purple-700' : 'text-gray-500 hover:bg-gray-50'}`}
         >
             <ShoppingBag className="w-4 h-4" /> Ma Boutique
+        </button>
+        
+        <div className="w-px h-8 bg-gray-200 mx-2"></div>
+        
+        <button 
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="p-3 relative text-gray-500 hover:bg-gray-50 rounded-lg transition-colors"
+        >
+            <Bell className="w-5 h-5"/>
+            {unreadNotifs > 0 && (
+                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+            )}
         </button>
       </div>
 
