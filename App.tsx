@@ -178,7 +178,11 @@ const INITIAL_SANCTIONS: Sanction[] = [
     { id: 's1', vendorId: MOCK_VENDOR.id, marketId: 'm1', type: 'warning', reason: 'Encombrement allée centrale', date: Date.now() - 86400000 * 3, status: 'active', issuedBy: 'a1' }
 ];
 
-const INITIAL_PRODUCTS: Product[] = [];
+const INITIAL_PRODUCTS: Product[] = [
+    { id: 'p1', stallId: 'm1-s1', name: 'Manioc Frais', price: 500, unit: 'kg', category: 'vivres', inStock: true, origin: 'Local (Kango)', description: 'Manioc doux fraîchement récolté ce matin.' },
+    { id: 'p2', stallId: 'm1-s1', name: 'Banane Plantain', price: 2000, unit: 'régime', category: 'vivres', inStock: true, origin: 'Cameroun', description: 'Gros régime de plantain mûr à point.' },
+    { id: 'p3', stallId: 'm1-s25', name: 'Tissu Wax Hollandais', price: 15000, unit: 'pièce', category: 'textile', inStock: true, origin: 'Import', description: 'Véritable Wax hollandais 6 yards, motifs exclusifs.' },
+];
 const INITIAL_ORDERS: ClientOrder[] = [];
 
 // Helper for local storage
@@ -210,6 +214,9 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<VendorProfile>(() => loadState('userProfile', MOCK_VENDOR));
   const [notifications, setNotifications] = useState<AppNotification[]>(() => loadState('notifications', []));
   
+  // Global Market Context for Public View
+  const [selectedPublicMarketId, setSelectedPublicMarketId] = useState<string>('m1'); // Default to Mont-Bouet
+
   // Persist State Effects
   useEffect(() => localStorage.setItem('markets', JSON.stringify(markets)), [markets]);
   useEffect(() => localStorage.setItem('stalls', JSON.stringify(stalls)), [stalls]);
@@ -586,6 +593,8 @@ const App: React.FC = () => {
             stalls={stalls} 
             markets={markets} 
             products={products}
+            activeMarketId={selectedPublicMarketId}
+            onMarketChange={setSelectedPublicMarketId}
             onBack={() => { setRole(null); setCurrentView('map'); }}
             onCreateOrder={handleCreateOrder}
           />

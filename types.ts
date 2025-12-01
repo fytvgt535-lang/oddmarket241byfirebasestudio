@@ -221,6 +221,10 @@ export interface Product {
   imageUrl?: string;
   inStock: boolean;
   category: ProductType;
+  // New Enhanced Fields
+  description?: string;
+  origin?: string; // e.g. "Gabon (Local)", "Cameroun", "Import"
+  subCategory?: string; // e.g. "Tubercule", "Feuille", "Poisson fumé"
 }
 
 export interface ClientOrder {
