@@ -8,7 +8,8 @@ import VendorDashboard from './components/VendorDashboard';
 import AgentFieldTool from './components/AgentFieldTool';
 import USSDSimulator from './components/USSDSimulator';
 import PublicMarketplace from './components/PublicMarketplace';
-import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt, Product, ClientOrder, AppNotification } from './types';
+import NetworkStatus from './components/NetworkStatus';
+import { Stall, HygieneReport, PaymentProvider, Transaction, VendorProfile, AppRole, Language, Market, Agent, Expense, SmsCampaign, Sanction, PaymentPlan, StallDocument, StallEmployee, StallActivity, StallMessage, StallHealth, AgentLog, Receipt, Product, ClientOrder, AppNotification, SubscriptionHistory } from './types';
 import { t } from './services/translations';
 
 // --- MOCK DATA GENERATION ---
@@ -160,13 +161,21 @@ const INITIAL_REPORTS: HygieneReport[] = [
   { id: '3', marketId: 'm2', category: 'infrastructure', description: 'Toiture qui fuit', location: 'Allée C', status: 'resolved', timestamp: Date.now() - 86400000, isAnonymous: false },
 ];
 
+const MOCK_SUB_HISTORY: SubscriptionHistory[] = [
+    { id: 'sub-1', date: Date.now() - 60 * 24 * 3600 * 1000, amount: 5000, planName: 'Livraison Pro', status: 'expired' },
+    { id: 'sub-2', date: Date.now() - 30 * 24 * 3600 * 1000, amount: 5000, planName: 'Livraison Pro', status: 'expired' },
+];
+
 const MOCK_VENDOR: VendorProfile = {
   id: 'V-LBV-2024-001',
   name: 'Mme. Ondo Clémence',
   phone: '07 23 45 67',
   hygieneScore: 4.5,
   isVulnerable: true,
-  language: 'fr'
+  language: 'fr',
+  isLogisticsSubscribed: false,
+  bio: 'Vente de produits frais et locaux depuis 2015.',
+  subscriptionHistory: MOCK_SUB_HISTORY
 };
 
 const INITIAL_PLANS: PaymentPlan[] = [
@@ -175,13 +184,13 @@ const INITIAL_PLANS: PaymentPlan[] = [
 ];
 
 const INITIAL_SANCTIONS: Sanction[] = [
-    { id: 's1', vendorId: MOCK_VENDOR.id, marketId: 'm1', type: 'warning', reason: 'Encombrement allée centrale', date: Date.now() - 86400000 * 3, status: 'active', issuedBy: 'a1' }
+    { id: 's1', vendorId: MOCK_VENDOR.id, marketId: 'm1', type: 'warning', reason: 'Encombrement allée centrale', amount: 0, date: Date.now() - 86400000 * 3, status: 'active', issuedBy: 'a1' }
 ];
 
 const INITIAL_PRODUCTS: Product[] = [
-    { id: 'p1', stallId: 'm1-s1', name: 'Manioc Frais', price: 500, unit: 'kg', category: 'vivres', inStock: true, origin: 'Local (Kango)', description: 'Manioc doux fraîchement récolté ce matin.' },
-    { id: 'p2', stallId: 'm1-s1', name: 'Banane Plantain', price: 2000, unit: 'régime', category: 'vivres', inStock: true, origin: 'Cameroun', description: 'Gros régime de plantain mûr à point.' },
-    { id: 'p3', stallId: 'm1-s25', name: 'Tissu Wax Hollandais', price: 15000, unit: 'pièce', category: 'textile', inStock: true, origin: 'Import', description: 'Véritable Wax hollandais 6 yards, motifs exclusifs.' },
+    { id: 'p1', stallId: 'm1-s1', name: 'Manioc Frais', price: 500, unit: 'kg', category: 'vivres', inStock: true, stockQuantity: 50, origin: 'Local (Kango)', description: 'Manioc doux fraîchement récolté ce matin.', tags: ['Frais', 'Local'] },
+    { id: 'p2', stallId: 'm1-s1', name: 'Banane Plantain', price: 2000, promoPrice: 1800, isPromo: true, unit: 'régime', category: 'vivres', inStock: true, stockQuantity: 10, origin: 'Cameroun', description: 'Gros régime de plantain mûr à point.' },
+    { id: 'p3', stallId: 'm1-s25', name: 'Tissu Wax Hollandais', price: 15000, unit: 'pièce', category: 'textile', inStock: true, stockQuantity: 5, origin: 'Import', description: 'Véritable Wax hollandais 6 yards, motifs exclusifs.', tags: ['Premium'] },
 ];
 const INITIAL_ORDERS: ClientOrder[] = [];
 
@@ -230,6 +239,7 @@ const App: React.FC = () => {
   useEffect(() => localStorage.setItem('products', JSON.stringify(products)), [products]);
   useEffect(() => localStorage.setItem('orders', JSON.stringify(orders)), [orders]);
   useEffect(() => localStorage.setItem('notifications', JSON.stringify(notifications)), [notifications]);
+  useEffect(() => localStorage.setItem('userProfile', JSON.stringify(userProfile)), [userProfile]);
 
   // If role is Vendor, we assume they are in Mont-Bouët (m1) by default for the map view
   const activeMarketId = 'm1'; 
@@ -389,7 +399,7 @@ const App: React.FC = () => {
     });
   };
 
-  const handleIssueSanction = (stallId: string, type: 'warning' | 'fine', reason: string, evidenceUrl?: string) => {
+  const handleIssueSanction = (stallId: string, type: 'warning' | 'fine', reason: string, amount: number, evidenceUrl?: string) => {
       const stall = stalls.find(s => s.id === stallId);
       const newSanction: Sanction = {
           id: `s-${Date.now()}`,
@@ -397,6 +407,7 @@ const App: React.FC = () => {
           marketId: 'm1',
           type,
           reason,
+          amount,
           date: Date.now(),
           status: 'active',
           issuedBy: 'a1',
@@ -415,7 +426,8 @@ const App: React.FC = () => {
         id: `log-${Date.now()}`,
         agentId: 'a1',
         actionType: 'sanction_issued',
-        details: `Sanction (${type}) Stall ${stall?.number}: ${reason}`,
+        details: `Sanction (${type}) Stall ${stall?.number}: ${reason} - ${amount}F`,
+        amount,
         timestamp: Date.now(),
         hash: `SHA256-${Math.random().toString(36).substr(2, 8).toUpperCase()}-${Date.now()}`,
         location: gpsLocation,
@@ -429,7 +441,7 @@ const App: React.FC = () => {
       addNotification({
         recipientRole: 'admin',
         title: 'Sanction Émise',
-        message: `Sanction type ${type} sur étal ${stall?.number}.`,
+        message: `Sanction de ${amount}F émise sur étal ${stall?.number}.`,
         type: 'warning'
       });
   };
@@ -494,6 +506,10 @@ const App: React.FC = () => {
     setProducts(prev => [...prev, newProd]);
   };
 
+  const handleUpdateProduct = (id: string, updates: Partial<Product>) => {
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
   const handleDeleteProduct = (id: string) => {
     setProducts(prev => prev.filter(p => p.id !== id));
   };
@@ -503,7 +519,9 @@ const App: React.FC = () => {
         ...orderData,
         id: `ORD-${Math.random().toString(36).substr(2,5).toUpperCase()}`,
         date: Date.now(),
-        status: 'paid' // Simulated immediate payment
+        status: 'paid', // Simulated immediate payment
+        deliveryMode: orderData.deliveryMode,
+        deliveryAddress: orderData.deliveryAddress
     };
     setOrders(prev => [newOrder, ...prev]);
     
@@ -511,19 +529,106 @@ const App: React.FC = () => {
     addNotification({
         recipientRole: 'vendor',
         title: 'Nouvelle Commande !',
-        message: `Commande de ${orderData.totalAmount} FCFA reçue.`,
+        message: `Commande de ${orderData.totalAmount} FCFA reçue (${orderData.deliveryMode === 'delivery' ? 'À Livrer' : 'Retrait'}).`,
         type: 'success'
     });
   };
 
   const handleUpdateOrderStatus = (orderId: string, status: ClientOrder['status']) => {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+    
+    // If status is ready and mode is delivery, notify admin logistics
+    if (status === 'ready') {
+        addNotification({
+            recipientRole: 'admin',
+            title: 'Colis Prêt pour Livraison',
+            message: `Commande #${orderId} prête à l'étal.`,
+            type: 'info'
+        });
+    }
+  };
+
+  // --- JUSTICE / CONTESTATION HANDLERS ---
+  const handleContestSanction = (sanctionId: string, reason: string) => {
+      setSanctions(prev => prev.map(s => s.id === sanctionId ? {
+          ...s,
+          appealStatus: 'pending',
+          appealDate: Date.now(),
+          appealReason: reason
+      } : s));
+
+      addNotification({
+        recipientRole: 'admin',
+        title: 'Nouvelle Contestation',
+        message: `Appel déposé pour la sanction #${sanctionId.slice(-4)}.`,
+        type: 'warning'
+      });
+  };
+
+  const handleResolveAppeal = (sanctionId: string, decision: 'accepted' | 'rejected') => {
+      setSanctions(prev => prev.map(s => {
+          if (s.id === sanctionId) {
+              return {
+                  ...s,
+                  appealStatus: decision,
+                  status: decision === 'accepted' ? 'resolved' : 'active'
+              };
+          }
+          return s;
+      }));
+
+      addNotification({
+        recipientRole: 'vendor',
+        recipientId: userProfile.id,
+        title: `Contestation ${decision === 'accepted' ? 'Acceptée' : 'Rejetée'}`,
+        message: decision === 'accepted' 
+            ? "Votre sanction a été annulée par l'administration." 
+            : "Votre appel a été rejeté. La sanction est maintenue.",
+        type: decision === 'accepted' ? 'success' : 'error'
+      });
+  };
+
+  // --- VENDOR PROFILE UPDATES ---
+  const handleUpdateProfile = (updates: Partial<VendorProfile>) => {
+      setUserProfile(prev => ({ ...prev, ...updates }));
+      addNotification({
+          recipientRole: 'vendor',
+          title: 'Profil Mis à Jour',
+          message: 'Vos informations ont été enregistrées.',
+          type: 'success'
+      });
+  };
+
+  const handleToggleLogistics = (subscribed: boolean) => {
+      const expiry = subscribed ? Date.now() + 30 * 24 * 60 * 60 * 1000 : undefined;
+      const newHistoryItem: SubscriptionHistory | undefined = subscribed ? {
+          id: `SUB-${Date.now()}`,
+          date: Date.now(),
+          amount: 5000,
+          planName: 'Livraison Pro',
+          status: 'active'
+      } : undefined;
+
+      setUserProfile(prev => ({ 
+          ...prev, 
+          isLogisticsSubscribed: subscribed,
+          subscriptionExpiry: expiry,
+          subscriptionHistory: newHistoryItem ? [newHistoryItem, ...(prev.subscriptionHistory || [])] : prev.subscriptionHistory
+      }));
+      
+      addNotification({
+          recipientRole: 'vendor',
+          title: subscribed ? 'Abonnement Activé' : 'Abonnement Résilié',
+          message: subscribed ? 'Le service de livraison est activé pour votre boutique.' : 'Le service a été désactivé.',
+          type: subscribed ? 'success' : 'info'
+      });
   };
 
   // Role Selection Screen (Landing)
   if (!role) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
+        <NetworkStatus />
         <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-8 bg-white rounded-3xl shadow-2xl overflow-hidden">
           <div className="p-8 lg:p-12 flex flex-col justify-center space-y-8">
             <div>
@@ -589,15 +694,18 @@ const App: React.FC = () => {
   // PUBLIC MARKETPLACE LAYOUT (NO AUTH)
   if (role === 'guest' && currentView === 'marketplace') {
       return (
-          <PublicMarketplace 
-            stalls={stalls} 
-            markets={markets} 
-            products={products}
-            activeMarketId={selectedPublicMarketId}
-            onMarketChange={setSelectedPublicMarketId}
-            onBack={() => { setRole(null); setCurrentView('map'); }}
-            onCreateOrder={handleCreateOrder}
-          />
+        <>
+            <NetworkStatus />
+            <PublicMarketplace 
+                stalls={stalls} 
+                markets={markets} 
+                products={products}
+                activeMarketId={selectedPublicMarketId}
+                onMarketChange={setSelectedPublicMarketId}
+                onBack={() => { setRole(null); setCurrentView('map'); }}
+                onCreateOrder={handleCreateOrder}
+            />
+        </>
       );
   }
 
@@ -618,6 +726,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
+      <NetworkStatus />
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -732,8 +841,12 @@ const App: React.FC = () => {
              orders={orders}
              notifications={notifications.filter(n => n.recipientRole === 'vendor')}
              onAddProduct={handleAddProduct}
+             onUpdateProduct={handleUpdateProduct}
              onDeleteProduct={handleDeleteProduct}
              onUpdateOrderStatus={handleUpdateOrderStatus}
+             onContestSanction={handleContestSanction}
+             onUpdateProfile={handleUpdateProfile}
+             onToggleLogistics={handleToggleLogistics}
           />
         )}
 
@@ -754,11 +867,13 @@ const App: React.FC = () => {
             expenses={expenses}
             paymentPlans={paymentPlans}
             notifications={notifications.filter(n => n.recipientRole === 'admin')}
+            sanctions={sanctions}
             onSendSms={handleSendSms}
             onApprovePlan={handleApprovePlan}
             onAddMarket={handleAddMarket}
             onUpdateMarket={handleUpdateMarket}
             onDeleteMarket={handleDeleteMarket}
+            onResolveAppeal={handleResolveAppeal}
           />
         )}
 

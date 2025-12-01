@@ -72,12 +72,17 @@ export interface Sanction {
   vendorId: string;
   marketId: string;
   type: 'warning' | 'fine' | 'suspension';
+  infractionId?: string; // Code officiel
   reason: string;
-  amount?: number;
+  amount: number; // Prix fixe obligatoire
   date: number;
   status: 'active' | 'resolved';
   issuedBy: string; // Agent ID
   evidenceUrl?: string; // New: Proof photo
+  // Justice / Appeal Module
+  appealReason?: string;
+  appealDate?: number;
+  appealStatus?: 'pending' | 'accepted' | 'rejected';
 }
 
 // --- AGENT SECURE LOGS (BLACK BOX) ---
@@ -97,7 +102,7 @@ export interface Agent {
   id: string;
   name: string;
   marketId: string;
-  role: 'collector' | 'hygiene';
+  role: 'collector' | 'hygiene' | 'delivery'; // Added delivery role
   performanceScore: number; // 0-100 based on targets
   lastActive: number;
   cashInHand: number; // Real-time cash tracking to be deposited
@@ -217,14 +222,18 @@ export interface Product {
   stallId: string;
   name: string;
   price: number;
+  promoPrice?: number; // New: Promotion
+  isPromo?: boolean; // New: Flag
   unit: string; // kg, paquet, pièce
   imageUrl?: string;
+  additionalImages?: string[]; // New: Multiple images
   inStock: boolean;
+  stockQuantity: number; // New: Precise stock management
   category: ProductType;
-  // New Enhanced Fields
   description?: string;
   origin?: string; // e.g. "Gabon (Local)", "Cameroun", "Import"
   subCategory?: string; // e.g. "Tubercule", "Feuille", "Poisson fumé"
+  tags?: string[]; // New: "Bio", "Pimenté", etc.
 }
 
 export interface ClientOrder {
@@ -234,10 +243,24 @@ export interface ClientOrder {
   customerPhone: string;
   items: { productId: string; name: string; quantity: number; price: number }[];
   totalAmount: number;
-  status: 'pending' | 'paid' | 'picked_up';
+  status: 'pending' | 'paid' | 'preparing' | 'ready' | 'picked_up'; // Enhanced status
   date: number;
   paymentProvider: 'orange' | 'airtel' | 'momo';
   paymentRef: string;
+  
+  // Logistics
+  deliveryMode: 'pickup' | 'delivery';
+  deliveryAddress?: string;
+  deliveryFee?: number;
+  assignedAgentId?: string; // Agent de mairie (livreur)
+}
+
+export interface SubscriptionHistory {
+  id: string;
+  date: number;
+  amount: number;
+  planName: string;
+  status: 'active' | 'expired';
 }
 
 export interface VendorProfile {
@@ -246,7 +269,26 @@ export interface VendorProfile {
   phone: string;
   stallId?: string;
   photoUrl?: string;
+  bannerUrl?: string; // New: Storefront banner
+  bio?: string; // New: Shop description
   hygieneScore: number; // 1 to 5 stars
   isVulnerable?: boolean; // Elderly or pregnant
   language: Language;
+  
+  // Logistics
+  isLogisticsSubscribed: boolean; // 5000 FCFA/mois subscription
+  subscriptionExpiry?: number;
+  subscriptionPlan?: 'standard' | 'premium';
+  subscriptionHistory?: SubscriptionHistory[];
 }
+
+// --- PREDEFINED INFRACTIONS (CODE PENAL MARCHE) ---
+export const PREDEFINED_INFRACTIONS = [
+  { id: 'HYG_01', label: 'Défaut d\'hygiène (Déchets)', amount: 5000 },
+  { id: 'HYG_02', label: 'Eaux usées sur voie publique', amount: 10000 },
+  { id: 'OCC_01', label: 'Débordement étal (Ligne jaune)', amount: 15000 },
+  { id: 'OCC_02', label: 'Obstruction allée sécurité', amount: 25000 },
+  { id: 'ADM_01', label: 'Absence de badge vendeur', amount: 2000 },
+  { id: 'ADM_02', label: 'Défaut carnet de santé', amount: 5000 },
+  { id: 'DIV_99', label: 'Autre (Saisie Manuelle)', amount: 0 } // Requires manual input
+];
