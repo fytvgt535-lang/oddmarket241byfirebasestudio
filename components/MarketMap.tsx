@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Stall, PaymentProvider, ProductType, Language } from '../types';
 import { t } from '../services/translations';
-import { ShoppingBag, Smartphone, Baby, AlertCircle } from 'lucide-react';
+import { ShoppingBag, Smartphone, Baby, AlertCircle, Lock, QrCode, Scan, ShieldCheck, RefreshCw } from 'lucide-react';
 
 interface MarketMapProps {
   stalls: Stall[];
@@ -16,11 +16,17 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
   const [isProcessing, setIsProcessing] = useState(false);
   const [filter, setFilter] = useState<ProductType | 'all'>('all');
   const [isPriorityRequest, setIsPriorityRequest] = useState(false);
+  
+  // Secure Cash State
+  const [agentScanned, setAgentScanned] = useState(false);
+  const [isScanMode, setIsScanMode] = useState(false);
 
   const handleStallClick = (stall: Stall) => {
     if (stall.status === 'free') {
       setSelectedStall(stall);
       setIsPriorityRequest(false); // Reset priority
+      setAgentScanned(false);
+      setPaymentProvider('orange'); // Reset to default non-cash
     }
   };
 
@@ -32,6 +38,15 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
       setIsProcessing(false);
       setSelectedStall(null);
     }, 2000);
+  };
+  
+  const handleScanAgent = () => {
+      setIsScanMode(true);
+      setTimeout(() => {
+          setIsScanMode(false);
+          setAgentScanned(true);
+          setPaymentProvider('cash');
+      }, 1500);
   };
 
   const filteredStalls = filter === 'all' 
@@ -137,7 +152,7 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
             <div className="space-y-3 mb-6">
               <p className="text-sm font-semibold text-gray-700">Moyen de paiement :</p>
               <div className="grid grid-cols-4 gap-2">
-                {(['orange', 'airtel', 'momo', 'cash'] as PaymentProvider[]).map((provider) => (
+                {(['orange', 'airtel', 'momo'] as PaymentProvider[]).map((provider) => (
                   <button
                     key={provider}
                     onClick={() => setPaymentProvider(provider)}
@@ -149,7 +164,35 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
                     {provider}
                   </button>
                 ))}
+                
+                {/* Secure Cash Button */}
+                <button
+                    onClick={() => agentScanned ? setPaymentProvider('cash') : null}
+                    disabled={!agentScanned}
+                    className={`p-2 border rounded-lg text-[10px] md:text-xs font-medium capitalize flex flex-col items-center gap-1 relative
+                      ${paymentProvider === 'cash' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'}
+                    `}
+                  >
+                    {!agentScanned && <Lock className="w-3 h-3 absolute top-1 right-1"/>}
+                    <Smartphone className="w-3 h-3" />
+                    Espèces
+                </button>
               </div>
+              
+              {!agentScanned && (
+                  <div className="mt-2 bg-yellow-50 p-2 rounded border border-yellow-100 text-xs text-yellow-700 flex items-center justify-between">
+                      <span>Payer en cash ? Scanner Agent requis.</span>
+                      <button onClick={handleScanAgent} className="bg-yellow-200 px-2 py-1 rounded font-bold hover:bg-yellow-300 flex items-center gap-1">
+                         {isScanMode ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Scan className="w-3 h-3"/>}
+                         Scan
+                      </button>
+                  </div>
+              )}
+              {agentScanned && (
+                  <div className="mt-2 bg-green-50 p-2 rounded border border-green-100 text-xs text-green-700 flex items-center gap-1 font-bold">
+                      <ShieldCheck className="w-4 h-4"/> Agent Authentifié. Cash débloqué.
+                  </div>
+              )}
             </div>
 
             <div className="flex gap-3">

@@ -1,4 +1,5 @@
 
+
 export type StallStatus = 'free' | 'occupied' | 'reserved';
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
 export type Language = 'fr' | 'fang' | 'mpongwe';
@@ -234,6 +235,12 @@ export interface Product {
   origin?: string; // e.g. "Gabon (Local)", "Cameroun", "Import"
   subCategory?: string; // e.g. "Tubercule", "Feuille", "Poisson fumé"
   tags?: string[]; // New: "Bio", "Pimenté", etc.
+  
+  // New V2 fields
+  wholesalePrices?: { minQuantity: number, price: number }[];
+  freshnessLevel?: number; // 0 (Old) - 100 (Fresh)
+  qualityGrade?: 'A' | 'B' | 'C';
+  audioDescriptionUrl?: string; // Voice Note
 }
 
 export interface ClientOrder {

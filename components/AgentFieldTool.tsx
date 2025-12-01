@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Scan, UserCheck, Banknote, Search, CheckCircle, History, AlertTriangle, Bot, MapPin, Wallet, Lock, ShieldCheck, ChevronRight, Filter, Camera, Power, LogOut, Printer, X, FileWarning } from 'lucide-react';
+import { Scan, UserCheck, Banknote, Search, CheckCircle, History, AlertTriangle, Bot, MapPin, Wallet, Lock, ShieldCheck, ChevronRight, Filter, Camera, Power, LogOut, Printer, X, FileWarning, QrCode } from 'lucide-react';
 import { Stall, Sanction, AgentLog, PREDEFINED_INFRACTIONS } from '../types';
 import { generateAgentScript } from '../services/geminiService';
 
@@ -16,7 +16,7 @@ interface AgentFieldToolProps {
 }
 
 const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agentLogs, cashInHand, isShiftActive, onCollectPayment, onIssueSanction, onShiftAction }) => {
-  const [activeTab, setActiveTab] = useState<'action' | 'history' | 'profile'>('action');
+  const [activeTab, setActiveTab] = useState<'action' | 'history' | 'profile' | 'receive'>('action');
   
   // ACTION STATE
   const [view, setView] = useState<'scan' | 'lookup' | 'result'>('scan');
@@ -42,6 +42,10 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
   const [historySearch, setHistorySearch] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState<'today' | 'week' | 'all'>('today');
   const [selectedLog, setSelectedLog] = useState<AgentLog | null>(null);
+  
+  // RECEIVE CASH QR STATE
+  const [receiveAmount, setReceiveAmount] = useState('');
+  const [generatedQR, setGeneratedQR] = useState<string | null>(null);
   
   // AI Script State
   const [aiScript, setAiScript] = useState<string | null>(null);
@@ -166,17 +170,13 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       }, 1000);
   };
 
-  const handleAskAi = async () => {
-      if(!scannedStall || !stallFinancials) return;
-      setLoadingAi(true);
-      const script = await generateAgentScript(
-          scannedStall, 
-          stallFinancials.totalDebt, 
-          stallFinancials.monthsUnpaid, 
-          [] 
-      );
-      setAiScript(script);
-      setLoadingAi(false);
+  const handleGenerateQR = () => {
+      if (!receiveAmount) return;
+      setIsProcessing(true);
+      setTimeout(() => {
+          setGeneratedQR(`AGENT-a1-AMT-${receiveAmount}-${Date.now()}`);
+          setIsProcessing(false);
+      }, 500);
   };
 
   const getCurrentLocation = () => {
@@ -270,13 +270,13 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       
       {/* HEADER */}
       <div className={`
-        ${activeTab === 'history' ? 'bg-slate-900' : mode === 'collect' ? 'bg-blue-900' : 'bg-red-900'} 
+        ${activeTab === 'history' ? 'bg-slate-900' : activeTab === 'receive' ? 'bg-green-800' : mode === 'collect' ? 'bg-blue-900' : 'bg-red-900'} 
         text-white p-4 shadow-md sticky top-0 z-20 transition-colors duration-300
       `}>
         <div className="flex justify-between items-center">
             <h2 className="text-lg font-bold flex items-center gap-2">
-              {activeTab === 'history' ? <History className="w-5 h-5"/> : <UserCheck className="w-5 h-5" />}
-              {activeTab === 'history' ? 'Historique' : 'Terminal Agent'}
+              {activeTab === 'history' ? <History className="w-5 h-5"/> : activeTab === 'receive' ? <QrCode className="w-5 h-5"/> : <UserCheck className="w-5 h-5" />}
+              {activeTab === 'history' ? 'Historique' : activeTab === 'receive' ? 'QR Encaissement' : 'Terminal Agent'}
             </h2>
             {activeTab === 'action' && (
                 <div className="flex bg-black/20 rounded p-1">
@@ -314,6 +314,44 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
                         <button onClick={closeReceipt} className="w-full py-3 bg-blue-600 text-white font-bold rounded shadow-lg">Fermer</button>
                     </div>
                 </div>
+            </div>
+        )}
+
+        {/* TAB 4: RECEIVE CASH QR */}
+        {activeTab === 'receive' && (
+            <div className="p-6 text-center space-y-6 animate-fade-in">
+                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                     <h3 className="font-bold text-gray-800 text-lg mb-2">Générer QR Encaissement</h3>
+                     <p className="text-sm text-gray-500 mb-6">Le vendeur doit scanner ce code pour débloquer son paiement.</p>
+                     
+                     {!generatedQR ? (
+                         <div className="space-y-4">
+                             <input 
+                                type="number" 
+                                placeholder="Montant (FCFA)" 
+                                value={receiveAmount}
+                                onChange={e => setReceiveAmount(e.target.value)}
+                                className="w-full p-4 bg-gray-50 rounded-xl text-center text-2xl font-bold outline-none focus:ring-2 focus:ring-green-500"
+                             />
+                             <button 
+                                onClick={handleGenerateQR}
+                                disabled={!receiveAmount}
+                                className="w-full py-4 bg-green-600 text-white font-bold rounded-xl shadow-lg disabled:bg-gray-300"
+                             >
+                                 Générer Code Sécurisé
+                             </button>
+                         </div>
+                     ) : (
+                         <div className="space-y-4">
+                             <div className="bg-white p-4 border-2 border-gray-800 rounded-xl inline-block">
+                                <QrCode className="w-48 h-48 text-gray-900"/>
+                             </div>
+                             <p className="font-mono text-xs text-gray-400 break-all">{generatedQR}</p>
+                             <p className="text-lg font-bold text-green-700">{parseInt(receiveAmount).toLocaleString()} FCFA</p>
+                             <button onClick={() => { setGeneratedQR(null); setReceiveAmount(''); }} className="text-sm text-gray-500 underline">Nouveau Code</button>
+                         </div>
+                     )}
+                 </div>
             </div>
         )}
 
@@ -480,14 +518,55 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
             </div>
         )}
 
-        {/* Other tabs (History, Profile) remain identical to previous version, omitted for brevity but would be included here */}
+        {/* Other tabs (History, Profile) */}
+        {activeTab === 'history' && (
+            <div className="p-4 space-y-4">
+                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center">
+                    <div>
+                        <p className="text-xs text-gray-500 font-bold uppercase">Total Encaissé</p>
+                        <h3 className="text-2xl font-black text-blue-600">{historyStats.totalCollected.toLocaleString()} F</h3>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-xs text-gray-500 font-bold uppercase">Actes</p>
+                        <h3 className="text-2xl font-black text-gray-800">{historyStats.countTotal}</h3>
+                    </div>
+                </div>
+
+                 <div className="flex gap-2 overflow-x-auto pb-2">
+                     <button onClick={() => setHistoryFilterType('all')} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${historyFilterType === 'all' ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200'}`}>Tout</button>
+                     <button onClick={() => setHistoryFilterType('payment')} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${historyFilterType === 'payment' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200'}`}>Paiements</button>
+                     <button onClick={() => setHistoryFilterType('sanction')} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${historyFilterType === 'sanction' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200'}`}>Sanctions</button>
+                 </div>
+
+                 <div className="space-y-2">
+                     {filteredLogs.map(log => (
+                         <div key={log.id} className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm flex justify-between items-center">
+                             <div className="flex items-center gap-3">
+                                 <div className={`p-2 rounded-full ${log.actionType === 'payment_collected' ? 'bg-green-100 text-green-600' : log.actionType === 'sanction_issued' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                                     {log.actionType === 'payment_collected' ? <Banknote className="w-4 h-4"/> : log.actionType === 'sanction_issued' ? <AlertTriangle className="w-4 h-4"/> : <History className="w-4 h-4"/>}
+                                 </div>
+                                 <div>
+                                     <p className="font-bold text-sm text-gray-800">{log.details}</p>
+                                     <p className="text-[10px] text-gray-400 font-mono">{new Date(log.timestamp).toLocaleTimeString()}</p>
+                                 </div>
+                             </div>
+                             {log.amount && <span className="font-bold text-gray-700">{log.amount.toLocaleString()} F</span>}
+                         </div>
+                     ))}
+                 </div>
+            </div>
+        )}
       </div>
 
-       {/* Bottom Nav (Same as before) */}
+       {/* Bottom Nav */}
        <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around p-2 pb-6 z-30">
         <button onClick={() => setActiveTab('action')} className={`flex flex-col items-center p-2 rounded-lg transition-colors ${activeTab === 'action' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}>
             <Scan className="w-6 h-6 mb-1" />
             <span className="text-[10px] font-bold">Scanner</span>
+        </button>
+        <button onClick={() => setActiveTab('receive')} className={`flex flex-col items-center p-2 rounded-lg transition-colors ${activeTab === 'receive' ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}>
+            <QrCode className="w-6 h-6 mb-1" />
+            <span className="text-[10px] font-bold">Recevoir</span>
         </button>
         <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center p-2 rounded-lg transition-colors ${activeTab === 'history' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}>
             <History className="w-6 h-6 mb-1" />

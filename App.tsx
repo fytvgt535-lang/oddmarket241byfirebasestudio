@@ -317,6 +317,10 @@ const App: React.FC = () => {
       reference: Math.random().toString(36).substr(2, 6).toUpperCase(),
       status: 'completed'
     };
+    
+    // If provider is cash, assign agent
+    if(provider === 'cash') newTx.collectedBy = 'a1';
+
     setTransactions(prev => [...prev, newTx]);
     setUserProfile(prev => ({ ...prev, stallId }));
     
