@@ -1,9 +1,35 @@
 
-
 export type StallStatus = 'free' | 'occupied' | 'reserved';
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
 export type Language = 'fr' | 'fang' | 'mpongwe';
 export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'guest';
+
+// --- AUTHENTICATION & USER MANAGEMENT ---
+export type KycStatus = 'pending' | 'verified' | 'rejected' | 'none';
+export type IdentityType = 'cni' | 'passport' | 'carte_sejour' | 'permis';
+
+export interface IdentityDocument {
+  type: IdentityType;
+  number: string;
+  fileUrl: string; // Simulated URL
+  uploadedAt: number;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  passwordHash: string; // Simulated
+  role: AppRole;
+  name: string;
+  phone: string;
+  isBanned: boolean;
+  kycStatus: KycStatus;
+  kycDocument?: IdentityDocument;
+  createdAt: number;
+  lastLogin?: number;
+  marketId?: string; // For agents/vendors linked to specific market
+  stallId?: string; // For vendors
+}
 
 // --- NEW: STALL HEALTH STATUS ---
 export type StallHealth = 'healthy' | 'warning' | 'critical';
@@ -101,6 +127,7 @@ export interface AgentLog {
 
 export interface Agent {
   id: string;
+  userId?: string; // Link to User
   name: string;
   marketId: string;
   role: 'collector' | 'hygiene' | 'delivery'; // Added delivery role
@@ -170,6 +197,7 @@ export interface Stall {
   // Basic Identity
   occupantName?: string; // Titulaire Legal
   occupantPhone?: string;
+  occupantId?: string; // Link to User ID
   
   // Metrics
   lastPaymentDate?: number; // For fraud detection
@@ -272,6 +300,7 @@ export interface SubscriptionHistory {
 
 export interface VendorProfile {
   id: string;
+  userId?: string; // Link to User
   name: string;
   phone: string;
   stallId?: string;
