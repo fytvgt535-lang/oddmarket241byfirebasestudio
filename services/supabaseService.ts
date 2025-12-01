@@ -147,12 +147,14 @@ export const signUpUser = async (email: string, password: string, metadata: any)
 
     if (profileError) {
       if (profileError.code === '23505') {
+         // Suppression du compte Auth orphelin si le profil échoue (rollback manuel)
          await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+         
          if (profileError.message?.includes('unique_phone')) throw new Error("Ce numéro de téléphone est déjà utilisé.");
          if (profileError.message?.includes('unique_name')) throw new Error("Ce nom d'affichage est déjà pris.");
          if (profileError.message?.includes('unique_kyc_number')) throw new Error("Ce numéro de document d'identité est déjà enregistré.");
       }
-      throw new Error("Erreur technique lors de la création du profil.");
+      throw new Error("Erreur technique lors de la création du profil : " + profileError.message);
     }
   }
 
@@ -226,21 +228,20 @@ export const deleteUserAccount = async (password: string) => {
   const { error } = await supabase.rpc('delete_own_account');
   
   if (error) {
-      console.error("Delete account error details:", JSON.stringify(error, null, 2));
+      console.error("Delete account error details:", error);
       
       // Gestion des erreurs spécifiques
       if (error.message?.includes('function delete_own_account() does not exist')) {
-          throw new Error("Erreur Système : La fonction SQL de suppression manque. Contactez le support.");
+          throw new Error("Erreur Système : La fonction SQL de suppression manque. Contactez le support (Admin).");
       }
       if (error.message?.includes('column "occupant_phone" of relation "stalls" does not exist')) {
-          throw new Error("Erreur Schéma DB : La colonne 'occupant_phone' manque dans la table 'stalls'. Veuillez exécuter le script SQL de migration.");
+          throw new Error("ERREUR CRITIQUE BASE DE DONNÉES : La colonne 'occupant_phone' manque dans la table 'stalls'. Veuillez exécuter le script SQL de migration fourni.");
       }
       
       throw new Error(`Erreur technique : ${error.message || JSON.stringify(error)}`);
   }
   
   // 3. Déconnexion forcée locale si succès (et si la session n'est pas déjà tuée par le serveur)
-  // On ignore l'erreur ici car l'utilisateur n'existe plus
   await supabase.auth.signOut().catch(() => {});
 };
 
@@ -283,7 +284,6 @@ export const updateUserProfile = async (userId: string, updates: Partial<VendorP
   }
 };
 
-// ... (Rest of data fetching functions remain unchanged)
 export const fetchMarkets = async () => {
   const { data, error } = await supabase.from('markets').select('*');
   if (error) throw error;

@@ -21,7 +21,9 @@
     "globals": "^16.5.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jsx-a11y": "^6.10.2"
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "react-easy-crop": "5.2.0",
+    "tslib": "2.6.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

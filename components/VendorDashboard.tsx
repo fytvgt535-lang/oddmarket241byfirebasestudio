@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
 import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut, Loader2 } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
 import { updateUserPassword, updateUserProfile, deleteUserAccount, uploadFile } from '../services/supabaseService';
+import ImageCropper from './ImageCropper';
 
 interface VendorDashboardProps {
   profile: VendorProfile;
@@ -37,6 +37,12 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [isSavingPass, setIsSavingPass] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
   
+  // IMAGE CROPPER STATE
+  const [cropImage, setCropImage] = useState<string | null>(null);
+  const [cropType, setCropType] = useState<'avatar' | 'product'>('avatar');
+  const [isCropping, setIsCropping] = useState(false);
+  const [isUploadingCrop, setIsUploadingCrop] = useState(false);
+
   // IMAGE UPLOAD STATE
   const profileImageInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingProfilePhoto, setIsUploadingProfilePhoto] = useState(false);
@@ -190,27 +196,72 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       }
   };
 
-  // REAL PHOTO UPLOAD
+  // --- IMAGE UPLOAD LOGIC WITH CROP ---
+  const readFile = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.addEventListener('load', () => resolve(reader.result as string), false);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleProfilePhotoClick = () => {
       profileImageInputRef.current?.click();
   };
 
   const handleProfileImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0) return;
-      
       const file = e.target.files[0];
-      setIsUploadingProfilePhoto(true);
-      setSettingsMsg(null);
+      const imageDataUrl = await readFile(file);
+      setCropImage(imageDataUrl);
+      setCropType('avatar');
+      setIsCropping(true);
+      // Reset input so same file can be selected again if cancelled
+      e.target.value = '';
+  };
 
+  const handleProductPhotoClick = () => {
+      productImageInputRef.current?.click();
+  };
+
+  const handleProductImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      const file = e.target.files[0];
+      const imageDataUrl = await readFile(file);
+      setCropImage(imageDataUrl);
+      setCropType('product');
+      setIsCropping(true);
+      e.target.value = '';
+  };
+
+  const handleCropComplete = async (croppedBlob: Blob) => {
+      setIsUploadingCrop(true);
       try {
-          const publicUrl = await uploadFile(file, 'avatars');
-          await updateUserProfile(profile.id, { photoUrl: publicUrl });
-          if (onUpdateProfile) onUpdateProfile({ photoUrl: publicUrl });
-          setSettingsMsg({ type: 'success', text: 'Photo de profil mise à jour !' });
+          const file = new File([croppedBlob], `crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const bucket = cropType === 'avatar' ? 'avatars' : 'products';
+          
+          if (cropType === 'avatar') setIsUploadingProfilePhoto(true);
+          else setIsUploadingProductPhoto(true);
+
+          const publicUrl = await uploadFile(file, bucket);
+
+          if (cropType === 'avatar') {
+              await updateUserProfile(profile.id, { photoUrl: publicUrl });
+              if (onUpdateProfile) onUpdateProfile({ photoUrl: publicUrl });
+              setSettingsMsg({ type: 'success', text: 'Photo de profil mise à jour !' });
+              setIsUploadingProfilePhoto(false);
+          } else {
+              setProductForm(prev => ({ ...prev, imageUrl: publicUrl }));
+              setIsUploadingProductPhoto(false);
+          }
+          
+          setIsCropping(false);
+          setCropImage(null);
       } catch (error: any) {
+          console.error(error);
           setSettingsMsg({ type: 'error', text: "Erreur upload : " + error.message });
       } finally {
-          setIsUploadingProfilePhoto(false);
+          setIsUploadingCrop(false);
       }
   };
 
@@ -301,25 +352,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const handleQuickStockUpdate = (product: Product, delta: number) => {
       const newQty = Math.max(0, product.stockQuantity + delta);
       onUpdateProduct(product.id, { stockQuantity: newQty, inStock: newQty > 0 });
-  };
-
-  // PRODUCT PHOTO UPLOAD
-  const handleProductPhotoClick = () => {
-      productImageInputRef.current?.click();
-  };
-
-  const handleProductImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (!e.target.files || e.target.files.length === 0) return;
-      const file = e.target.files[0];
-      setIsUploadingProductPhoto(true);
-      try {
-          const publicUrl = await uploadFile(file, 'products');
-          setProductForm(prev => ({ ...prev, imageUrl: publicUrl }));
-      } catch (error: any) {
-          alert("Erreur upload: " + error.message);
-      } finally {
-          setIsUploadingProductPhoto(false);
-      }
   };
 
   const handleProductSubmit = (e: React.FormEvent) => {
@@ -536,7 +568,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                         />
                     </div>
                     
-                    {/* Real Image Upload */}
+                    {/* Real Image Upload with Crop Trigger */}
                     <input 
                         type="file" 
                         ref={productImageInputRef} 
@@ -552,7 +584,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                 <div className="bg-white p-3 rounded-full shadow-sm">
                                     {isUploadingProductPhoto ? <Loader2 className="w-6 h-6 animate-spin text-green-600"/> : <ImageIcon className="w-6 h-6 text-gray-600"/>}
                                 </div>
-                                <span className="text-xs font-bold">{isUploadingProductPhoto ? "Envoi en cours..." : "Ajouter Photo"}</span>
+                                <span className="text-xs font-bold">{isUploadingProductPhoto ? "Traitement..." : "Ajouter Photo"}</span>
                             </>
                         )}
                     </div>
@@ -565,6 +597,18 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   return (
     <div className="space-y-4 relative max-w-lg mx-auto md:max-w-none">
       
+      {/* IMAGE CROPPER MODAL */}
+      {isCropping && cropImage && (
+        <ImageCropper 
+          imageSrc={cropImage}
+          cropShape={cropType === 'avatar' ? 'round' : 'rect'}
+          aspect={cropType === 'avatar' ? 1 : 4/3}
+          onCancel={() => { setIsCropping(false); setCropImage(null); }}
+          onComplete={handleCropComplete}
+          isLoading={isUploadingCrop}
+        />
+      )}
+
       {/* HEADER */}
       <div className="flex justify-between items-center bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
