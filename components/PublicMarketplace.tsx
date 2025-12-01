@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, Star, ShoppingBag, ArrowLeft, Filter, Leaf, Shirt, Smartphone, Sparkles, X, Plus, Minus, ShoppingCart, CheckCircle, Smartphone as PhoneIcon, Clock, Download, Map as MapIcon, Navigation, MessageCircle, Info, ChevronDown } from 'lucide-react';
 import { Stall, Market, Product, ClientOrder } from '../types';
@@ -119,7 +118,8 @@ const PublicMarketplace: React.FC<PublicMarketplaceProps> = ({ stalls, markets, 
           items: cart.map(i => ({ productId: i.product.id, name: i.product.name, quantity: i.quantity, price: i.product.price })),
           totalAmount: cartTotal,
           paymentProvider: customerInfo.provider,
-          paymentRef: `PAY-${Date.now()}`
+          paymentRef: `PAY-${Date.now()}`,
+          deliveryMode: 'pickup'
       });
 
       setIsCheckoutOpen(false);

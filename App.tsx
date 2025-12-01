@@ -20,7 +20,7 @@ import {
   Receipt, Product, ClientOrder, AppNotification, User 
 } from './types';
 
-// --- MOCK DATA FALLBACKS (Si la DB est vide au départ) ---
+// --- MOCK DATA FALLBACKS ---
 const INITIAL_MARKETS: Market[] = [
   { id: 'm1', name: 'Marché Mont-Bouët', location: 'Libreville Centre', targetRevenue: 50000000 },
   { id: 'm2', name: 'Marché Akébé', location: '3ème Arrondissement', targetRevenue: 15000000 },
@@ -33,20 +33,20 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [loginError, setLoginError] = useState<string>('');
-  const [isAuthLoading, setIsAuthLoading] = useState(false); // New loading state for auth
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // --- APP STATE ---
   const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool' | 'marketplace'>('map');
-  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
 
   // Data from Supabase
-  const [users, setUsers] = useState<User[]>([]); // Admin view mainly
+  const [users, setUsers] = useState<User[]>([]);
   const [markets, setMarkets] = useState<Market[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
-  // Local state for non-critical or mock-heavy features in this prototype
+  // Local state for non-critical features
   const [reports, setReports] = useState<HygieneReport[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -57,29 +57,37 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [selectedPublicMarketId, setSelectedPublicMarketId] = useState<string>('m1');
 
+  // New: Specific state for extra profile fields not in User type
+  const [vendorDetails, setVendorDetails] = useState<{bio?: string, photoUrl?: string}>({});
+
   // --- 1. INITIALIZATION & AUTH ---
   useEffect(() => {
-    // Check active session
+    // Check session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session?.user) fetchUserProfile(session.user.id);
+      if (session?.user) {
+        fetchUserProfile(session.user.id);
+      }
     });
 
     // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session?.user) fetchUserProfile(session.user.id);
-      else setCurrentUser(null);
+      if (session?.user) {
+        fetchUserProfile(session.user.id);
+      } else {
+        setCurrentUser(null);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- 2. DATA FETCHING & REALTIME ---
+  // --- 2. DATA FETCHING ---
   useEffect(() => {
     const loadData = async () => {
+      if (!session) return;
+      
       setIsDataLoading(true);
       try {
         const [fetchedMarkets, fetchedStalls, fetchedProducts, fetchedTrans] = await Promise.all([
@@ -93,7 +101,6 @@ const App: React.FC = () => {
         setStalls(fetchedStalls);
         setProducts(fetchedProducts);
         setTransactions(fetchedTrans);
-
       } catch (error) {
         console.error("Error loading data:", error);
       } finally {
@@ -101,20 +108,17 @@ const App: React.FC = () => {
       }
     };
 
-    if (session) {
-      loadData();
+    loadData();
 
-      // Subscribe to Realtime Updates
+    if (session) {
       const marketSub = SupabaseService.subscribeToTable('markets', () => loadData());
       const stallSub = SupabaseService.subscribeToTable('stalls', () => loadData());
       const productSub = SupabaseService.subscribeToTable('products', () => loadData());
-      const transSub = SupabaseService.subscribeToTable('transactions', () => loadData());
-
+      
       return () => {
         marketSub.unsubscribe();
         stallSub.unsubscribe();
         productSub.unsubscribe();
-        transSub.unsubscribe();
       };
     }
   }, [session]);
@@ -122,6 +126,7 @@ const App: React.FC = () => {
   const fetchUserProfile = async (userId: string) => {
     try {
       const profile = await SupabaseService.getCurrentUserProfile(userId);
+      
       if (profile) {
         setCurrentUser({
           id: profile.id,
@@ -135,13 +140,18 @@ const App: React.FC = () => {
           createdAt: new Date(profile.created_at).getTime()
         });
         
-        // Route based on role
+        // Load extra details
+        setVendorDetails({
+            bio: profile.bio,
+            photoUrl: profile.avatar_url
+        });
+        
+        // Auto-route
         if (profile.role === 'admin') setCurrentView('dashboard');
         else if (profile.role === 'agent') setCurrentView('agent-tool');
         else if (profile.role === 'vendor') setCurrentView('map');
       } else {
-        // Fallback: If profile doesn't exist in DB but user is authenticated in Supabase
-        // (e.g. race condition or legacy data). Use Auth Metadata.
+        console.warn("Profil introuvable pour cet utilisateur auth.");
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
              setCurrentUser({
@@ -152,18 +162,14 @@ const App: React.FC = () => {
                  phone: '',
                  isBanned: false,
                  kycStatus: 'pending',
-                 createdAt: new Date().getTime(),
+                 createdAt: Date.now(),
                  passwordHash: '***'
              });
-             // Set default view
-             const role = user.user_metadata?.role || 'vendor';
-             if (role === 'admin') setCurrentView('dashboard');
-             else if (role === 'agent') setCurrentView('agent-tool');
-             else setCurrentView('map');
+             setCurrentView('map');
         }
       }
     } catch (error: any) {
-      console.error("Profile fetch error", error.message || error);
+      console.error("Profile fetch error", error);
     }
   };
 
@@ -175,7 +181,7 @@ const App: React.FC = () => {
     try {
       await SupabaseService.signInUser(email, pass);
     } catch (error: any) {
-      setLoginError(error.message || "Erreur de connexion");
+      setLoginError("Email ou mot de passe incorrect.");
     } finally {
       setIsAuthLoading(false);
     }
@@ -184,22 +190,26 @@ const App: React.FC = () => {
   const handleRegister = async (data: any) => {
     setIsAuthLoading(true);
     try {
-      await SupabaseService.signUpUser(data.email, data.password, {
+      const result = await SupabaseService.signUpUser(data.email, data.password, {
         name: data.name,
-        // No phone passed here
-        phone: '', 
         role: 'vendor',
         kycDocument: {
            type: data.identityType,
            number: data.identityNumber,
-           fileUrl: data.identityFile, // In real app, upload to Storage first
+           fileUrl: data.identityFile,
            uploadedAt: Date.now()
         }
       });
-      alert("Compte créé !");
-      setAuthView('login');
+
+      if (result.session) {
+         // Auto-login success handled by onAuthStateChange
+      } else {
+         alert("Compte créé. Connectez-vous.");
+         setAuthView('login');
+      }
     } catch (error: any) {
-      alert("Erreur inscription: " + error.message);
+      console.error(error);
+      alert("Erreur: " + (error.message || "Inscription impossible"));
     } finally {
       setIsAuthLoading(false);
     }
@@ -214,13 +224,23 @@ const App: React.FC = () => {
   const handleAddProduct = async (productData: Omit<Product, 'id'>) => {
     try {
        await SupabaseService.createProduct(productData);
-       // Realtime subscription will update the list automatically
     } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateLocalProfile = (updates: Partial<VendorProfile>) => {
+      // Update local state immediately for UI responsiveness
+      if (currentUser) {
+          setCurrentUser(prev => prev ? ({ ...prev, name: updates.name || prev.name, phone: updates.phone || prev.phone }) : null);
+      }
+      setVendorDetails(prev => ({
+          ...prev,
+          bio: updates.bio !== undefined ? updates.bio : prev.bio,
+          photoUrl: updates.photoUrl !== undefined ? updates.photoUrl : prev.photoUrl
+      }));
   };
 
   // --- RENDER ---
 
-  // 1. GUEST VIEW
   if (currentUser?.role === 'guest') {
     return (
       <PublicMarketplace 
@@ -234,10 +254,15 @@ const App: React.FC = () => {
     );
   }
 
-  // 2. AUTH SCREENS
   if (!session && !currentUser) {
     if (authView === 'register') {
-      return <RegisterScreen onRegister={handleRegister} onBackToLogin={() => setAuthView('login')} />;
+      return (
+        <RegisterScreen 
+          onRegister={handleRegister} 
+          onBackToLogin={() => setAuthView('login')} 
+          isLoading={isAuthLoading}
+        />
+      );
     }
     return <LoginScreen 
       onLogin={handleLogin} 
@@ -248,12 +273,11 @@ const App: React.FC = () => {
     />;
   }
 
-  if (!currentUser || isDataLoading) {
+  if (!currentUser) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-spin w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full"></div></div>;
   }
 
   const role = currentUser.role;
-  // Fallback profile for vendor dashboard if user is vendor
   const vendorProfile: VendorProfile = {
       id: currentUser.id,
       userId: currentUser.id,
@@ -262,14 +286,15 @@ const App: React.FC = () => {
       stallId: stalls.find(s => s.occupantId === currentUser.id)?.id, 
       hygieneScore: 4.5,
       language: 'fr',
-      isLogisticsSubscribed: false
+      isLogisticsSubscribed: false,
+      bio: vendorDetails.bio,
+      photoUrl: vendorDetails.photoUrl
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
       <NetworkStatus />
       
-      {/* HEADER */}
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -280,25 +305,21 @@ const App: React.FC = () => {
               <div className="leading-tight">
                 <h1 className="text-lg font-bold text-gray-900">MarchéConnect</h1>
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">
-                   {currentUser.name} ({role})
+                   {currentUser.name}
                 </p>
               </div>
             </div>
 
-            <nav className="hidden md:flex items-center gap-1">
-               {role === 'vendor' && <button onClick={() => setCurrentView('map')} className="px-3 py-2 text-sm text-gray-600 font-bold hover:bg-gray-100 rounded-lg">Mon Espace</button>}
-               {role === 'admin' && <button onClick={() => setCurrentView('dashboard')} className="px-3 py-2 text-sm text-gray-600 font-bold hover:bg-gray-100 rounded-lg">Administration</button>}
-               
-               <div className="h-6 w-px bg-gray-200 mx-2"></div>
-               <button onClick={handleLogout} className="text-red-600 font-bold text-sm px-3 py-2 hover:bg-red-50 rounded-lg flex items-center gap-2">
-                   <LogOut className="w-4 h-4"/> Déconnexion
+            <nav className="flex items-center gap-2">
+               <button onClick={handleLogout} className="text-gray-500 hover:text-red-600 font-bold text-sm px-3 py-2 hover:bg-red-50 rounded-lg flex items-center gap-2 transition-colors">
+                   <LogOut className="w-4 h-4"/>
+                   <span className="hidden md:inline">Déconnexion</span>
                </button>
             </nav>
           </div>
         </div>
       </header>
 
-      {/* MAIN CONTENT */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
          {currentView === 'map' && role === 'vendor' && (
              <VendorDashboard 
@@ -315,6 +336,7 @@ const App: React.FC = () => {
                 onUpdateProduct={(id, updates) => setProducts(prev => prev.map(p => p.id === id ? {...p, ...updates} : p))}
                 onDeleteProduct={(id) => setProducts(prev => prev.filter(p => p.id !== id))}
                 onUpdateOrderStatus={() => {}}
+                onUpdateProfile={handleUpdateLocalProfile}
              />
          )}
 

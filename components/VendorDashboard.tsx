@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
-import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan } from 'lucide-react';
+import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
+import { updateUserPassword, updateUserProfile } from '../services/supabaseService';
 
 interface VendorDashboardProps {
   profile: VendorProfile;
@@ -29,6 +30,13 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [aiTip, setAiTip] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   
+  // SETTINGS STATE
+  const [profileForm, setProfileForm] = useState({ name: profile.name, phone: profile.phone, bio: profile.bio || '' });
+  const [passForm, setPassForm] = useState({ current: '', new: '', confirm: '' });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingPass, setIsSavingPass] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
+
   // STORE MANAGEMENT STATE
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<string>('all');
   const [storeSearch, setStoreSearch] = useState('');
@@ -97,6 +105,62 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
 
     return rentDebt + fines;
   }, [myStall, sanctions, profile.id]);
+
+
+  // --- SETTINGS LOGIC ---
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setIsSavingProfile(true);
+      setSettingsMsg(null);
+      try {
+          await updateUserProfile(profile.id, {
+              name: profileForm.name,
+              phone: profileForm.phone,
+              bio: profileForm.bio
+          });
+          if (onUpdateProfile) onUpdateProfile(profileForm);
+          setSettingsMsg({ type: 'success', text: 'Profil mis à jour avec succès !' });
+      } catch (err) {
+          setSettingsMsg({ type: 'error', text: 'Erreur lors de la mise à jour.' });
+      } finally {
+          setIsSavingProfile(false);
+      }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (passForm.new !== passForm.confirm) {
+          setSettingsMsg({ type: 'error', text: 'Les mots de passe ne correspondent pas.' });
+          return;
+      }
+      if (passForm.new.length < 6) {
+          setSettingsMsg({ type: 'error', text: 'Le mot de passe doit faire 6 caractères min.' });
+          return;
+      }
+      
+      setIsSavingPass(true);
+      setSettingsMsg(null);
+      try {
+          await updateUserPassword(passForm.new);
+          setSettingsMsg({ type: 'success', text: 'Mot de passe modifié !' });
+          setPassForm({ current: '', new: '', confirm: '' });
+      } catch (err) {
+          setSettingsMsg({ type: 'error', text: 'Erreur technique. Réessayez.' });
+      } finally {
+          setIsSavingPass(false);
+      }
+  };
+
+  const handlePhotoUpload = () => {
+      // Simulate photo upload
+      const dummyUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200";
+      if (onUpdateProfile) {
+          onUpdateProfile({ photoUrl: dummyUrl });
+          // In real app, call updateUserProfile({ photoUrl: ... }) here
+          updateUserProfile(profile.id, { photoUrl: dummyUrl });
+      }
+      alert("Photo mise à jour (Simulation)");
+  };
 
 
   // --- STORE LOGIC ---
@@ -743,10 +807,9 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
         </div>
       )}
 
-      {/* --- TAB 3 & 4 (Logistics & Settings - Same as before) --- */}
+      {/* --- TAB 3: LOGISTICS --- */}
       {activeTab === 'logistics' && (
            <div className="space-y-6 animate-fade-in">
-               {/* Same content as before */}
                <div className={`rounded-3xl p-6 relative overflow-hidden text-white shadow-lg ${profile.isLogisticsSubscribed ? 'bg-orange-500' : 'bg-slate-800'}`}>
                   <div className="relative z-10">
                       <div className="flex items-center gap-3 mb-4">
@@ -786,12 +849,121 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
            </div>
       )}
 
+      {/* --- TAB 4: SETTINGS --- */}
       {activeTab === 'settings' && (
-           <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 space-y-4">
-               <button className="w-full p-4 bg-gray-50 rounded-2xl flex items-center justify-between font-bold text-gray-700">
-                   <span className="flex items-center gap-3"><User className="w-5 h-5"/> Modifier Profil</span>
-                   <Settings className="w-5 h-5 text-gray-400"/>
-               </button>
+           <div className="space-y-6 animate-fade-in">
+               {/* Feedback Message */}
+               {settingsMsg && (
+                   <div className={`p-4 rounded-xl flex items-center gap-3 ${settingsMsg.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                       {settingsMsg.type === 'success' ? <CheckCircle className="w-5 h-5"/> : <AlertTriangle className="w-5 h-5"/>}
+                       <p className="text-sm font-bold">{settingsMsg.text}</p>
+                   </div>
+               )}
+
+               {/* Profile Photo */}
+               <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center">
+                   <div onClick={handlePhotoUpload} className="relative cursor-pointer group">
+                       <div className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden border-4 border-white shadow-lg">
+                           {profile.photoUrl ? (
+                               <img src={profile.photoUrl} alt="Avatar" className="w-full h-full object-cover"/>
+                           ) : (
+                               <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600 font-bold text-2xl">
+                                   {profile.name.charAt(0)}
+                               </div>
+                           )}
+                       </div>
+                       <div className="absolute bottom-0 right-0 bg-white p-2 rounded-full shadow-md border border-gray-200 group-hover:scale-110 transition-transform">
+                           <Camera className="w-4 h-4 text-gray-600"/>
+                       </div>
+                   </div>
+                   <p className="mt-3 text-xs text-gray-400">Appuyez pour changer</p>
+               </div>
+
+               {/* Personal Info Form */}
+               <form onSubmit={handleUpdateProfile} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
+                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2">
+                       <User className="w-5 h-5 text-blue-600"/> Mes Infos
+                   </h3>
+                   
+                   <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Nom d'affichage</label>
+                       <input 
+                          type="text" 
+                          value={profileForm.name} 
+                          onChange={e => setProfileForm({...profileForm, name: e.target.value})}
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"
+                       />
+                   </div>
+                   <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Téléphone</label>
+                       <input 
+                          type="tel" 
+                          value={profileForm.phone} 
+                          onChange={e => setProfileForm({...profileForm, phone: e.target.value})}
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"
+                       />
+                   </div>
+                   <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Bio Boutique</label>
+                       <textarea 
+                          value={profileForm.bio} 
+                          onChange={e => setProfileForm({...profileForm, bio: e.target.value})}
+                          placeholder="Décrivez votre étal..."
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium text-gray-700 h-24 resize-none"
+                       />
+                   </div>
+                   
+                   <button 
+                      type="submit" 
+                      disabled={isSavingProfile}
+                      className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 disabled:bg-gray-300 flex items-center justify-center gap-2"
+                   >
+                       {isSavingProfile ? "Enregistrement..." : <><Save className="w-4 h-4"/> Enregistrer</>}
+                   </button>
+               </form>
+
+               {/* Password Form */}
+               <form onSubmit={handleChangePassword} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
+                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2">
+                       <Lock className="w-5 h-5 text-orange-600"/> Sécurité
+                   </h3>
+                   
+                   <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Nouveau Mot de Passe</label>
+                       <input 
+                          type="password" 
+                          value={passForm.new} 
+                          onChange={e => setPassForm({...passForm, new: e.target.value})}
+                          placeholder="••••••••"
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
+                       />
+                   </div>
+                   <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Confirmer</label>
+                       <input 
+                          type="password" 
+                          value={passForm.confirm} 
+                          onChange={e => setPassForm({...passForm, confirm: e.target.value})}
+                          placeholder="••••••••"
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
+                       />
+                   </div>
+
+                   <button 
+                      type="submit" 
+                      disabled={isSavingPass}
+                      className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg disabled:bg-gray-300 flex items-center justify-center gap-2"
+                   >
+                       {isSavingPass ? "Modification..." : "Changer Mot de Passe"}
+                   </button>
+               </form>
+
+               {/* Danger Zone */}
+               <div className="pt-8">
+                   <button type="button" onClick={() => alert("Contactez la mairie pour supprimer votre compte.")} className="w-full py-3 text-red-500 font-bold text-sm hover:bg-red-50 rounded-xl transition-colors">
+                       Supprimer mon compte
+                   </button>
+               </div>
            </div>
       )}
     </div>
