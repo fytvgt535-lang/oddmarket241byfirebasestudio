@@ -11,7 +11,8 @@ export const signUpUser = async (email: string, password: string, metadata: any)
     options: {
       data: {
         name: metadata.name,
-        phone: metadata.phone,
+        // Phone is optional/removed
+        phone: metadata.phone || '',
         role: metadata.role || 'vendor'
       }
     }
@@ -20,6 +21,7 @@ export const signUpUser = async (email: string, password: string, metadata: any)
   if (error) throw error;
 
   // Création manuelle du profil si le trigger DB n'est pas actif
+  // Note: On insert même si email confirmation est pending (si config DB permet)
   if (data.user) {
     const { error: profileError } = await supabase
       .from('profiles')
@@ -29,12 +31,18 @@ export const signUpUser = async (email: string, password: string, metadata: any)
           email: email,
           name: metadata.name,
           role: metadata.role || 'vendor',
-          phone: metadata.phone,
+          phone: metadata.phone || '',
           kyc_status: 'pending',
           kyc_document: metadata.kycDocument // JSONB
         }
       ]);
-    if (profileError) console.error('Error creating profile:', profileError);
+      
+    if (profileError) {
+        // Ignorer l'erreur si c'est un doublon (profil déjà créé par trigger)
+        if (!profileError.message.includes('duplicate key')) {
+            console.error('Error creating profile:', profileError);
+        }
+    }
   }
   
   return data;
@@ -59,7 +67,7 @@ export const getCurrentUserProfile = async (userId: string) => {
     .from('profiles')
     .select('*')
     .eq('id', userId)
-    .single();
+    .maybeSingle(); // Use maybeSingle to avoid error if profile doesn't exist yet
     
   if (error) throw error;
   return data;

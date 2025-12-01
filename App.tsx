@@ -33,6 +33,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [loginError, setLoginError] = useState<string>('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false); // New loading state for auth
 
   // --- APP STATE ---
   const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool' | 'marketplace'>('map');
@@ -138,29 +139,55 @@ const App: React.FC = () => {
         if (profile.role === 'admin') setCurrentView('dashboard');
         else if (profile.role === 'agent') setCurrentView('agent-tool');
         else if (profile.role === 'vendor') setCurrentView('map');
+      } else {
+        // Fallback: If profile doesn't exist in DB but user is authenticated in Supabase
+        // (e.g. race condition or legacy data). Use Auth Metadata.
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+             setCurrentUser({
+                 id: user.id,
+                 email: user.email || '',
+                 name: user.user_metadata?.name || 'Utilisateur',
+                 role: user.user_metadata?.role || 'vendor',
+                 phone: '',
+                 isBanned: false,
+                 kycStatus: 'pending',
+                 createdAt: new Date().getTime(),
+                 passwordHash: '***'
+             });
+             // Set default view
+             const role = user.user_metadata?.role || 'vendor';
+             if (role === 'admin') setCurrentView('dashboard');
+             else if (role === 'agent') setCurrentView('agent-tool');
+             else setCurrentView('map');
+        }
       }
-    } catch (error) {
-      console.error("Profile fetch error", error);
-      // Fallback for new user without profile
+    } catch (error: any) {
+      console.error("Profile fetch error", error.message || error);
     }
   };
 
   // --- HANDLERS ---
 
   const handleLogin = async (email: string, pass: string) => {
+    setIsAuthLoading(true);
+    setLoginError('');
     try {
-      setLoginError('');
       await SupabaseService.signInUser(email, pass);
     } catch (error: any) {
       setLoginError(error.message || "Erreur de connexion");
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   const handleRegister = async (data: any) => {
+    setIsAuthLoading(true);
     try {
       await SupabaseService.signUpUser(data.email, data.password, {
         name: data.name,
-        phone: data.phone,
+        // No phone passed here
+        phone: '', 
         role: 'vendor',
         kycDocument: {
            type: data.identityType,
@@ -169,10 +196,12 @@ const App: React.FC = () => {
            uploadedAt: Date.now()
         }
       });
-      alert("Compte créé ! Vérifiez votre email ou connectez-vous.");
+      alert("Compte créé !");
       setAuthView('login');
     } catch (error: any) {
       alert("Erreur inscription: " + error.message);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
@@ -215,6 +244,7 @@ const App: React.FC = () => {
       onGoToRegister={() => setAuthView('register')} 
       onGuestAccess={() => setCurrentUser({ id: 'guest', role: 'guest', name: 'Visiteur', email: '', phone: '', passwordHash: '', isBanned: false, kycStatus: 'none', createdAt: 0 })}
       error={loginError}
+      isLoading={isAuthLoading}
     />;
   }
 

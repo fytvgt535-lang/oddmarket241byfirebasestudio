@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { User, Mail, Phone, Lock, Upload, ArrowRight, ArrowLeft, CheckCircle, ShieldCheck, CreditCard } from 'lucide-react';
+import { User, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle, ShieldCheck, CreditCard } from 'lucide-react';
 import { IdentityType } from '../../types';
 
 interface RegisterScreenProps {
@@ -13,7 +12,6 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    phone: '',
     password: '',
     confirmPassword: '',
     identityType: 'cni' as IdentityType,
@@ -50,17 +48,10 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email (Optionnel)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
                         <div className="relative">
                             <Mail className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" />
-                            <input type="email" placeholder="jean@email.com" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full pl-12 pr-4 py-3 bg-gray-50 border-gray-200 border rounded-xl outline-none focus:border-green-500"/>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Téléphone Mobile</label>
-                        <div className="relative">
-                            <Phone className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" />
-                            <input required type="tel" placeholder="07 XX XX XX" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full pl-12 pr-4 py-3 bg-gray-50 border-gray-200 border rounded-xl outline-none focus:border-green-500"/>
+                            <input required type="email" placeholder="jean@email.com" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full pl-12 pr-4 py-3 bg-gray-50 border-gray-200 border rounded-xl outline-none focus:border-green-500"/>
                         </div>
                     </div>
                 </div>
