@@ -1,4 +1,3 @@
-
 import { supabase } from '../supabaseClient';
 import { User, VendorProfile, Market, Stall, Product, Transaction, AppRole } from '../types';
 
@@ -335,6 +334,8 @@ export const fetchProducts = async () => {
     imageUrl: p.image_url,
     isPromo: p.is_promo,
     promoPrice: p.promo_price,
+    costPrice: p.details?.costPrice,
+    isVisible: p.details?.isVisible !== undefined ? p.details.isVisible : true,
     ...p.details
   })) as Product[];
 };
@@ -356,7 +357,14 @@ export const fetchTransactions = async () => {
 };
 
 export const createProduct = async (product: Omit<Product, 'id'>) => {
-  const { stallId, name, price, category, stockQuantity, description, imageUrl, isPromo, promoPrice, ...details } = product;
+  const { stallId, name, price, category, stockQuantity, description, imageUrl, isPromo, promoPrice, costPrice, isVisible, ...details } = product;
+  
+  const productDetails = {
+      ...details,
+      costPrice,
+      isVisible
+  };
+
   const { data, error } = await supabase
     .from('products')
     .insert([{
@@ -369,11 +377,53 @@ export const createProduct = async (product: Omit<Product, 'id'>) => {
       image_url: imageUrl,
       is_promo: isPromo,
       promo_price: promoPrice,
-      details: details
+      details: productDetails
     }])
     .select();
   if (error) throw error;
   return data;
+};
+
+export const updateProduct = async (productId: string, updates: Partial<Product>) => {
+  const { name, price, stockQuantity, category, description, imageUrl, isPromo, promoPrice, stallId, costPrice, isVisible, ...detailsUpdates } = updates;
+  
+  // First, we need to fetch the existing product to merge details correctly if we want to be safe, 
+  // or we can just update the JSONb keys if postgres supports it, but simple update replaces the column content usually.
+  // For simplicity in this app context, we'll fetch then update.
+  
+  const { data: existingData, error: fetchError } = await supabase
+    .from('products')
+    .select('details')
+    .eq('id', productId)
+    .single();
+    
+  if (fetchError) throw fetchError;
+  
+  const existingDetails = existingData.details || {};
+  const newDetails = { 
+      ...existingDetails, 
+      ...detailsUpdates,
+      ...(costPrice !== undefined && { costPrice }),
+      ...(isVisible !== undefined && { isVisible })
+  };
+
+  const dbUpdates: any = { details: newDetails };
+  
+  if (name !== undefined) dbUpdates.name = name;
+  if (price !== undefined) dbUpdates.price = price;
+  if (stockQuantity !== undefined) dbUpdates.stock_quantity = stockQuantity;
+  if (category !== undefined) dbUpdates.category = category;
+  if (description !== undefined) dbUpdates.description = description;
+  if (imageUrl !== undefined) dbUpdates.image_url = imageUrl;
+  if (isPromo !== undefined) dbUpdates.is_promo = isPromo;
+  if (promoPrice !== undefined) dbUpdates.promo_price = promoPrice;
+
+  const { error } = await supabase
+    .from('products')
+    .update(dbUpdates)
+    .eq('id', productId);
+
+  if (error) throw error;
 };
 
 export const updateStallStatus = async (stallId: string, status: string, occupantData?: any) => {
@@ -391,7 +441,7 @@ export const updateStallStatus = async (stallId: string, status: string, occupan
   if (error) throw error;
 };
 
-export const createTransaction = async (transaction: Omit<Transaction, 'id'>) => {
+export const createTransaction = async (transaction: Omit<Transaction, 'id' | 'date'>) => {
   const { error } = await supabase.from('transactions').insert([{
       market_id: transaction.marketId,
       amount: transaction.amount,

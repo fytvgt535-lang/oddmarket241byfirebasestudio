@@ -17,7 +17,7 @@ import RegisterScreen from './components/Auth/RegisterScreen';
 import { 
   Stall, HygieneReport, Transaction, VendorProfile, 
   Market, Agent, Expense, Sanction, PaymentPlan, 
-  Receipt, Product, ClientOrder, AppNotification, User 
+  Receipt, Product, ClientOrder, AppNotification, User, PaymentProvider 
 } from './types';
 
 // --- MOCK DATA FALLBACKS ---
@@ -35,8 +35,9 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string>('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // --- APP STATE ---
-  const [currentView, setCurrentView] = useState<'map' | 'report' | 'dashboard' | 'profile' | 'agent-tool' | 'marketplace'>('map');
+  // --- APP STATE (ROUTING) ---
+  // On utilise des vues explicites basées sur le rôle
+  const [currentView, setCurrentView] = useState<'vendor-dashboard' | 'admin-dashboard' | 'agent-tool' | 'marketplace'>('vendor-dashboard');
   const [isDataLoading, setIsDataLoading] = useState(false);
 
   // Data from Supabase
@@ -46,7 +47,7 @@ const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
-  // Local state for non-critical features
+  // Local state for non-critical features or mocks
   const [reports, setReports] = useState<HygieneReport[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -55,14 +56,15 @@ const App: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [orders, setOrders] = useState<ClientOrder[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  
+  // Public View State
   const [selectedPublicMarketId, setSelectedPublicMarketId] = useState<string>('m1');
 
-  // New: Specific state for extra profile fields not in User type
+  // Specific state for extra profile fields
   const [vendorDetails, setVendorDetails] = useState<{bio?: string, photoUrl?: string}>({});
 
   // --- 1. INITIALIZATION & AUTH ---
   useEffect(() => {
-    // Check session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
@@ -70,7 +72,6 @@ const App: React.FC = () => {
       }
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (event === 'SIGNED_OUT' || !session) {
@@ -129,7 +130,7 @@ const App: React.FC = () => {
       const profile = await SupabaseService.getCurrentUserProfile(userId);
       
       if (profile) {
-        setCurrentUser({
+        const userObj: User = {
           id: profile.id,
           name: profile.name,
           email: profile.email,
@@ -139,35 +140,50 @@ const App: React.FC = () => {
           kycStatus: profile.kyc_status,
           passwordHash: '***',
           createdAt: new Date(profile.created_at).getTime()
-        });
+        };
         
-        // Load extra details
+        setCurrentUser(userObj);
         setVendorDetails({
             bio: profile.bio,
             photoUrl: profile.avatar_url
         });
         
-        // Auto-route
-        if (profile.role === 'admin') setCurrentView('dashboard');
-        else if (profile.role === 'agent') setCurrentView('agent-tool');
-        else if (profile.role === 'vendor') setCurrentView('map');
+        // --- ROUTING INTELLIGENT ---
+        // Redirection automatique selon le rôle
+        switch(profile.role) {
+            case 'admin':
+                setCurrentView('admin-dashboard');
+                break;
+            case 'agent':
+                setCurrentView('agent-tool');
+                break;
+            case 'vendor':
+                setCurrentView('vendor-dashboard');
+                break;
+            case 'guest':
+                setCurrentView('marketplace');
+                break;
+            default:
+                setCurrentView('vendor-dashboard'); // Fallback safe
+        }
+
       } else {
-        console.warn("Profil introuvable pour cet utilisateur auth.");
-        // Try fallback to metadata if profile fetch failed but auth succeeded
+        console.warn("Profil introuvable, tentative de fallback...");
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-             setCurrentUser({
+             const fallbackUser: User = {
                  id: user.id,
                  email: user.email || '',
                  name: user.user_metadata?.name || 'Utilisateur',
-                 role: user.user_metadata?.role || 'vendor',
+                 role: 'vendor', // Par défaut
                  phone: '',
                  isBanned: false,
                  kycStatus: 'pending',
                  createdAt: Date.now(),
                  passwordHash: '***'
-             });
-             setCurrentView('map');
+             };
+             setCurrentUser(fallbackUser);
+             setCurrentView('vendor-dashboard');
         }
       }
     } catch (error: any) {
@@ -194,7 +210,7 @@ const App: React.FC = () => {
     try {
       const result = await SupabaseService.signUpUser(data.email, data.password, {
         name: data.name,
-        role: 'vendor',
+        role: 'vendor', // Par défaut, on crée des vendeurs. Les agents/admins sont créés manuellement en DB ou via interface admin.
         kycDocument: {
            type: data.identityType,
            number: data.identityNumber,
@@ -204,7 +220,7 @@ const App: React.FC = () => {
       });
 
       if (result.session) {
-         // Auto-login success handled by onAuthStateChange
+         // Auto-login handled by subscription
       } else {
          alert("Compte créé. Connectez-vous.");
          setAuthView('login');
@@ -219,17 +235,24 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await SupabaseService.signOutUser();
-    // Logic handled by onAuthStateChange
   };
 
   const handleAddProduct = async (productData: Omit<Product, 'id'>) => {
     try {
        await SupabaseService.createProduct(productData);
-    } catch (e) { console.error(e); }
+    } catch (e) { throw e; }
+  };
+
+  const handleUpdateProduct = async (id: string, updates: Partial<Product>) => {
+      try {
+          await SupabaseService.updateProduct(id, updates);
+          setProducts(prev => prev.map(p => p.id === id ? {...p, ...updates} : p));
+      } catch (e) {
+          throw e;
+      }
   };
 
   const handleUpdateLocalProfile = (updates: Partial<VendorProfile>) => {
-      // Update local state immediately for UI responsiveness
       if (currentUser) {
           setCurrentUser(prev => prev ? ({ ...prev, name: updates.name || prev.name, phone: updates.phone || prev.phone }) : null);
       }
@@ -240,7 +263,45 @@ const App: React.FC = () => {
       }));
   };
 
-  // --- RENDER ---
+  const handleReserveStall = async (stallId: string, provider: PaymentProvider, isPriority: boolean) => {
+      if (!currentUser) return;
+      
+      try {
+          const stall = stalls.find(s => s.id === stallId);
+          if (!stall) return;
+
+          await SupabaseService.updateStallStatus(stallId, 'occupied', {
+              id: currentUser.id,
+              name: currentUser.name,
+              phone: currentUser.phone
+          });
+
+          await SupabaseService.createTransaction({
+              marketId: stall.marketId,
+              amount: stall.price,
+              type: 'rent',
+              status: 'completed',
+              stallNumber: stall.number,
+              reference: `RES-${Date.now()}`,
+              provider: provider
+          });
+
+          setStalls(prev => prev.map(s => s.id === stallId ? { 
+              ...s, 
+              status: 'occupied', 
+              occupantId: currentUser.id, 
+              occupantName: currentUser.name,
+              lastPaymentDate: Date.now()
+          } : s));
+
+          alert(`Félicitations ! Vous avez réservé l'étal ${stall.number}.`);
+      } catch (error: any) {
+          console.error("Reservation failed:", error);
+          alert("Erreur lors de la réservation : " + error.message);
+      }
+  };
+
+  // --- VIEW RENDERING ---
 
   if (currentUser?.role === 'guest') {
     return (
@@ -268,7 +329,7 @@ const App: React.FC = () => {
     return <LoginScreen 
       onLogin={handleLogin} 
       onGoToRegister={() => setAuthView('register')} 
-      onGuestAccess={() => { /* Guest access disabled */ }}
+      onGuestAccess={() => {}}
       error={loginError}
       isLoading={isAuthLoading}
     />;
@@ -278,6 +339,8 @@ const App: React.FC = () => {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-spin w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full"></div></div>;
   }
 
+  // --- ROLE-BASED VIEW SELECTION ---
+  
   const role = currentUser.role;
   const vendorProfile: VendorProfile = {
       id: currentUser.id,
@@ -296,6 +359,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
       <NetworkStatus />
       
+      {/* GLOBAL HEADER (Except for Guest/Public) */}
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -306,7 +370,7 @@ const App: React.FC = () => {
               <div className="leading-tight">
                 <h1 className="text-lg font-bold text-gray-900">MarchéConnect</h1>
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">
-                   {currentUser.name}
+                   {role === 'admin' ? 'Espace Mairie' : role === 'agent' ? 'Terminal Agent' : 'Espace Vendeur'}
                 </p>
               </div>
             </div>
@@ -322,26 +386,31 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-         {currentView === 'map' && role === 'vendor' && (
+         
+         {/* 1. VENDOR VIEW */}
+         {currentView === 'vendor-dashboard' && role === 'vendor' && (
              <VendorDashboard 
                 profile={vendorProfile} 
                 transactions={transactions.filter(t => t.stallNumber === vendorProfile.stallId)} 
                 receipts={receipts}
                 myStall={stalls.find(s => s.id === vendorProfile.stallId)}
+                stalls={stalls} // Nécessaire pour la réservation
                 myReports={reports}
                 sanctions={sanctions}
                 products={products.filter(p => p.stallId === vendorProfile.stallId)}
                 orders={orders}
                 notifications={notifications}
                 onAddProduct={handleAddProduct}
-                onUpdateProduct={(id, updates) => setProducts(prev => prev.map(p => p.id === id ? {...p, ...updates} : p))}
+                onUpdateProduct={handleUpdateProduct}
                 onDeleteProduct={(id) => setProducts(prev => prev.filter(p => p.id !== id))}
                 onUpdateOrderStatus={() => {}}
                 onUpdateProfile={handleUpdateLocalProfile}
+                onReserve={handleReserveStall}
              />
          )}
 
-         {currentView === 'dashboard' && role === 'admin' && (
+         {/* 2. ADMIN VIEW */}
+         {currentView === 'admin-dashboard' && role === 'admin' && (
              <AdminDashboard 
                 markets={markets}
                 stalls={stalls}
@@ -362,6 +431,7 @@ const App: React.FC = () => {
              />
          )}
 
+         {/* 3. AGENT VIEW */}
          {currentView === 'agent-tool' && role === 'agent' && (
              <AgentFieldTool 
                 stalls={stalls}

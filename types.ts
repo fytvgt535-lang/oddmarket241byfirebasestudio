@@ -253,6 +253,8 @@ export interface Product {
   price: number;
   promoPrice?: number; // New: Promotion
   isPromo?: boolean; // New: Flag
+  costPrice?: number; // New: Prix d'achat pour calcul de marge
+  isVisible?: boolean; // New: Gestion visibilité
   unit: string; // kg, paquet, pièce
   imageUrl?: string;
   additionalImages?: string[]; // New: Multiple images
@@ -328,3 +330,25 @@ export const PREDEFINED_INFRACTIONS = [
   { id: 'ADM_02', label: 'Défaut carnet de santé', amount: 5000 },
   { id: 'DIV_99', label: 'Autre (Saisie Manuelle)', amount: 0 } // Requires manual input
 ];
+
+export interface VendorDashboardProps {
+  profile: VendorProfile;
+  transactions: Transaction[];
+  receipts: Receipt[];
+  myStall?: Stall;
+  stalls?: Stall[]; // Added for reservation
+  myReports: HygieneReport[];
+  sanctions: Sanction[];
+  paymentPlan?: PaymentPlan;
+  products: Product[];
+  orders: ClientOrder[];
+  notifications: AppNotification[];
+  onAddProduct: (product: Omit<Product, 'id'>) => Promise<any>;
+  onUpdateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
+  onDeleteProduct: (id: string) => void;
+  onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
+  onContestSanction?: (sanctionId: string, reason: string) => void;
+  onUpdateProfile?: (updates: Partial<VendorProfile>) => void;
+  onToggleLogistics?: (subscribed: boolean) => void;
+  onReserve?: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void; // Added for reservation
+}

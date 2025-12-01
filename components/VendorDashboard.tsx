@@ -1,34 +1,17 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
-import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut, Loader2 } from 'lucide-react';
+import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification, VendorDashboardProps } from '../types';
+import { CheckCircle, MapPin, ShieldCheck, User, QrCode, AlertTriangle, History, Sparkles, Lock, Plus, Trash2, Edit, Package, Bell, X, Truck, Settings, Image as ImageIcon, Box, Volume2, Minus, Tag, TicketPercent, Search, ArrowUpDown, Copy, RefreshCw, Scan, Camera, Save, Loader2, Eye, EyeOff, Share2, DollarSign, ArrowLeft } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
 import { updateUserPassword, updateUserProfile, deleteUserAccount, uploadFile } from '../services/supabaseService';
 import ImageCropper from './ImageCropper';
+import MarketMap from './MarketMap';
 
-interface VendorDashboardProps {
-  profile: VendorProfile;
-  transactions: Transaction[];
-  receipts: Receipt[];
-  myStall?: Stall;
-  myReports: HygieneReport[];
-  sanctions: Sanction[];
-  paymentPlan?: PaymentPlan;
-  products: Product[];
-  orders: ClientOrder[];
-  notifications: AppNotification[];
-  onAddProduct: (product: Omit<Product, 'id'>) => void;
-  onUpdateProduct: (id: string, updates: Partial<Product>) => void;
-  onDeleteProduct: (id: string) => void;
-  onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
-  onContestSanction?: (sanctionId: string, reason: string) => void;
-  onUpdateProfile?: (updates: Partial<VendorProfile>) => void;
-  onToggleLogistics?: (subscribed: boolean) => void;
-}
-
-const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, myReports, sanctions, paymentPlan, products, orders, notifications, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateOrderStatus, onContestSanction, onUpdateProfile, onToggleLogistics }) => {
+const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, receipts, myStall, stalls, myReports, sanctions, paymentPlan, products, orders, notifications, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateOrderStatus, onContestSanction, onUpdateProfile, onToggleLogistics, onReserve }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'store' | 'logistics' | 'settings'>('overview');
   const [aiTip, setAiTip] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   
   // SETTINGS STATE
   const [profileForm, setProfileForm] = useState({ name: profile.name, phone: profile.phone, bio: profile.bio || '' });
@@ -64,6 +47,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const productImageInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingProductPhoto, setIsUploadingProductPhoto] = useState(false);
+  const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
   
   // SECURE PAYMENT STATE
   const [isPayingDebt, setIsPayingDebt] = useState(false);
@@ -78,8 +62,10 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [productForm, setProductForm] = useState({ 
       name: '', 
       price: '', 
+      costPrice: '', // New
       promoPrice: '', 
       isPromo: false,
+      isVisible: true, // New
       unit: 'pièce', 
       category: 'vivres', 
       quantity: '1', 
@@ -310,8 +296,10 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
           setProductForm({
               name: product.name,
               price: product.price.toString(),
+              costPrice: product.costPrice?.toString() || '',
               promoPrice: product.promoPrice?.toString() || '',
               isPromo: product.isPromo || false,
+              isVisible: product.isVisible !== undefined ? product.isVisible : true,
               unit: product.unit,
               category: product.category,
               quantity: product.stockQuantity.toString(),
@@ -326,7 +314,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
           });
       } else {
           setEditingProduct(null);
-          setProductForm({ name: '', price: '', promoPrice: '', isPromo: false, unit: 'pièce', category: 'vivres', quantity: '10', description: '', origin: '', tagsString: '', imageUrl: '', freshnessLevel: 100, qualityGrade: 'A', wholesalePrice: '', wholesaleQty: '' });
+          setProductForm({ name: '', price: '', costPrice: '', promoPrice: '', isPromo: false, isVisible: true, unit: 'pièce', category: 'vivres', quantity: '10', description: '', origin: '', tagsString: '', imageUrl: '', freshnessLevel: 100, qualityGrade: 'A', wholesalePrice: '', wholesaleQty: '' });
       }
       setIsProductModalOpen(true);
   };
@@ -349,50 +337,81 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       }
   };
 
+  const handleToggleVisibility = (product: Product) => {
+      onUpdateProduct(product.id, { isVisible: !product.isVisible });
+  };
+
+  const handleShareProduct = (product: Product) => {
+      const text = `
+🛒 *Nouveau chez ${profile.name} !*
+
+*${product.name}*
+💰 Prix : *${product.price} FCFA* / ${product.unit}
+${product.isPromo ? `🔥 PROMO : ${product.promoPrice} FCFA` : ''}
+
+📍 Dispo au Marché (Étal ${myStall?.number || '?'})
+📦 Commandez ici !
+`.trim();
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   const handleQuickStockUpdate = (product: Product, delta: number) => {
       const newQty = Math.max(0, product.stockQuantity + delta);
       onUpdateProduct(product.id, { stockQuantity: newQty, inStock: newQty > 0 });
   };
 
-  const handleProductSubmit = (e: React.FormEvent) => {
+  const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!myStall) return;
-    
-    const tags = productForm.tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    const promoPriceNum = productForm.isPromo && productForm.promoPrice ? Number(productForm.promoPrice) : undefined;
-    
-    let wholesalePrices = undefined;
-    if (productForm.wholesaleQty && productForm.wholesalePrice) {
-        wholesalePrices = [{ minQuantity: Number(productForm.wholesaleQty), price: Number(productForm.wholesalePrice) }];
+    if (!myStall) {
+        alert("Vous n'avez pas d'étal assigné. Veuillez en réserver un depuis la page 'Moi'.");
+        setIsProductModalOpen(false);
+        return;
     }
+    
+    setIsSubmittingProduct(true);
+    try {
+        const tags = productForm.tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0);
+        const promoPriceNum = productForm.isPromo && productForm.promoPrice ? Number(productForm.promoPrice) : undefined;
+        
+        let wholesalePrices = undefined;
+        if (productForm.wholesaleQty && productForm.wholesalePrice) {
+            wholesalePrices = [{ minQuantity: Number(productForm.wholesaleQty), price: Number(productForm.wholesalePrice) }];
+        }
 
-    const commonData = {
-        name: productForm.name,
-        price: Number(productForm.price),
-        promoPrice: promoPriceNum,
-        isPromo: productForm.isPromo,
-        unit: productForm.unit,
-        category: productForm.category as any,
-        stockQuantity: Number(productForm.quantity),
-        inStock: Number(productForm.quantity) > 0,
-        description: productForm.description,
-        origin: productForm.origin,
-        tags: tags,
-        imageUrl: productForm.imageUrl || undefined,
-        freshnessLevel: productForm.freshnessLevel,
-        qualityGrade: productForm.qualityGrade,
-        wholesalePrices
-    };
+        const commonData = {
+            name: productForm.name,
+            price: Number(productForm.price),
+            costPrice: Number(productForm.costPrice) || undefined,
+            promoPrice: promoPriceNum,
+            isPromo: productForm.isPromo,
+            isVisible: productForm.isVisible,
+            unit: productForm.unit,
+            category: productForm.category as any,
+            stockQuantity: Number(productForm.quantity),
+            inStock: Number(productForm.quantity) > 0,
+            description: productForm.description,
+            origin: productForm.origin,
+            tags: tags,
+            imageUrl: productForm.imageUrl || undefined,
+            freshnessLevel: productForm.freshnessLevel,
+            qualityGrade: productForm.qualityGrade,
+            wholesalePrices
+        };
 
-    if (editingProduct) {
-        onUpdateProduct(editingProduct.id, commonData);
-    } else {
-        onAddProduct({
-            stallId: myStall.id,
-            ...commonData,
-        });
+        if (editingProduct) {
+            await onUpdateProduct(editingProduct.id, commonData);
+        } else {
+            await onAddProduct({
+                stallId: myStall.id,
+                ...commonData,
+            });
+        }
+        setIsProductModalOpen(false);
+    } catch (err: any) {
+        alert("Erreur lors de l'enregistrement : " + err.message);
+    } finally {
+        setIsSubmittingProduct(false);
     }
-    setIsProductModalOpen(false);
   };
   
   const handleScanAgent = () => {
@@ -415,8 +434,33 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
     return Math.max(0, Math.min(100, (remaining / totalDuration) * 100));
   };
 
+  // --- MAP VIEW (If selecting stall) ---
+  if (showMap && stalls && onReserve) {
+      return (
+          <div className="relative min-h-screen bg-gray-50">
+              <div className="sticky top-0 z-10 bg-white shadow-sm p-4 flex items-center justify-between">
+                  <button onClick={() => setShowMap(false)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-bold">
+                      <ArrowLeft className="w-5 h-5"/> Retour
+                  </button>
+                  <h2 className="text-lg font-bold">Choisir un Emplacement</h2>
+              </div>
+              <div className="p-4">
+                  <MarketMap 
+                    stalls={stalls} 
+                    onReserve={(id, provider, priority) => { onReserve(id, provider, priority); setShowMap(false); }} 
+                    language={profile.language || 'fr'}
+                  />
+              </div>
+          </div>
+      );
+  }
+
   // --- WIZARD STEPS RENDERER ---
   const renderWizardStep = () => {
+    const profit = (Number(productForm.price) || 0) - (Number(productForm.costPrice) || 0);
+    const margin = Number(productForm.price) > 0 ? Math.round((profit / Number(productForm.price)) * 100) : 0;
+    const isLoss = profit < 0 && Number(productForm.costPrice) > 0;
+
     switch (wizardStep) {
         case 1: // BASICS
             return (
@@ -461,13 +505,13 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
             return (
                 <div className="space-y-6 animate-fade-in">
                     <div className="text-center">
-                        <h4 className="text-xl font-bold text-gray-800">Combien ça coûte ?</h4>
-                        <p className="text-sm text-gray-500">Prix et Unité</p>
+                        <h4 className="text-xl font-bold text-gray-800">Prix & Rentabilité</h4>
+                        <p className="text-sm text-gray-500">Combien ça coûte ?</p>
                     </div>
                     
                     <div className="flex gap-4">
                         <div className="flex-1">
-                             <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Prix Unitaire</label>
+                             <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Prix Vente</label>
                              <div className="relative">
                                  <input 
                                     type="number"
@@ -494,6 +538,35 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                              </select>
                         </div>
                     </div>
+
+                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 space-y-3">
+                        <div>
+                            <label className="text-xs font-bold text-blue-800 uppercase mb-1 block">Prix d'Achat (Optionnel)</label>
+                            <input 
+                                type="number" 
+                                placeholder="Combien tu as acheté ça ?" 
+                                value={productForm.costPrice}
+                                onChange={e => setProductForm({...productForm, costPrice: e.target.value})}
+                                className="w-full p-2 bg-white rounded-lg border border-blue-200 outline-none text-center font-bold"
+                            />
+                        </div>
+                        {profit !== 0 && productForm.costPrice && (
+                            <div className="flex justify-between items-center text-sm pt-2 border-t border-blue-200">
+                                <span>Bénéfice : <span className={`font-black ${profit > 0 ? 'text-green-600' : 'text-red-500'}`}>{profit} F</span></span>
+                                <span className="bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">Marge: {margin}%</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {isLoss && (
+                        <div className="bg-red-600 text-white p-4 rounded-2xl animate-pulse shadow-lg flex items-start gap-3">
+                            <AlertTriangle className="w-6 h-6 shrink-0 mt-1"/>
+                            <div>
+                                <h3 className="font-bold text-lg">ATTENTION : VENTE À PERTE</h3>
+                                <p className="text-xs text-red-100">Vous perdez {Math.abs(profit)} F sur chaque vente. Augmentez votre prix !</p>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
                         <div className="flex justify-between items-center mb-2">
@@ -710,27 +783,33 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                     </div>
                 </>
             ) : (
-                <div className="py-8">
-                    <p className="text-xl font-bold text-gray-400">Pas d'étal</p>
+                <div className="py-8 text-center">
+                    <p className="text-xl font-bold text-gray-400 mb-4">Pas d'étal assigné</p>
+                    <button onClick={() => setShowMap(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-green-700 transition-colors">
+                        Trouver un Emplacement
+                    </button>
                 </div>
             )}
-             <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleSpeak("Voici votre QR Code unique.")} className="bg-blue-600 active:bg-blue-700 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-blue-200">
-                    <QrCode className="w-8 h-8" />
-                    <span className="font-bold">Mon QR</span>
-                </button>
-                {totalDebt > 0 ? (
-                    <button onClick={() => setIsPayingDebt(true)} className="bg-red-600 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-red-200 animate-pulse">
-                         <AlertTriangle className="w-8 h-8" />
-                         <span className="font-bold text-sm">Payer {totalDebt.toLocaleString()} F</span>
+             
+             {myStall && (
+                <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => handleSpeak("Voici votre QR Code unique.")} className="bg-blue-600 active:bg-blue-700 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                        <QrCode className="w-8 h-8" />
+                        <span className="font-bold">Mon QR</span>
                     </button>
-                ) : (
-                    <button className="bg-white border-2 border-gray-100 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-600 active:bg-gray-50">
-                        <History className="w-8 h-8" />
-                        <span className="font-bold">Historique</span>
-                    </button>
-                )}
-            </div>
+                    {totalDebt > 0 ? (
+                        <button onClick={() => setIsPayingDebt(true)} className="bg-red-600 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-red-200 animate-pulse">
+                            <AlertTriangle className="w-8 h-8" />
+                            <span className="font-bold text-sm">Payer {totalDebt.toLocaleString()} F</span>
+                        </button>
+                    ) : (
+                        <button className="bg-white border-2 border-gray-100 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-600 active:bg-gray-50">
+                            <History className="w-8 h-8" />
+                            <span className="font-bold">Historique</span>
+                        </button>
+                    )}
+                </div>
+             )}
         </div>
         
         {aiTip && (
@@ -797,8 +876,13 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
             </div>
 
             <div className="space-y-3 pb-24">
-                {filteredProducts.map(product => (
-                    <div key={product.id} className="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex gap-4 items-stretch relative overflow-hidden">
+                {filteredProducts.map(product => {
+                    const margin = (product.price > 0 && product.costPrice) 
+                        ? Math.round(((product.price - product.costPrice) / product.price) * 100) 
+                        : null;
+
+                    return (
+                    <div key={product.id} className={`bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex gap-4 items-stretch relative overflow-hidden ${!product.isVisible ? 'opacity-70 bg-gray-50' : ''}`}>
                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${product.stockQuantity === 0 ? 'bg-red-500' : product.stockQuantity < 5 ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         <div className="w-24 h-24 bg-gray-50 rounded-xl shrink-0 overflow-hidden relative group self-center">
                              {product.imageUrl ? (
@@ -811,16 +895,33 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                              {product.isPromo && (
                                  <span className="absolute top-0 left-0 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-br-lg z-10">PROMO</span>
                              )}
+                             {!product.isVisible && (
+                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                     <EyeOff className="w-6 h-6 text-white"/>
+                                 </div>
+                             )}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
                             <div>
                                 <div className="flex justify-between items-start">
                                     <h3 className="font-bold text-gray-800 text-base leading-tight truncate pr-2">{product.name}</h3>
-                                    <button onClick={() => handleOpenProductModal(product)} className="text-gray-400 hover:text-blue-600"><Edit className="w-4 h-4"/></button>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => handleToggleVisibility(product)} className="text-gray-400 hover:text-gray-600">
+                                            {product.isVisible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
+                                        </button>
+                                        <button onClick={() => handleOpenProductModal(product)} className="text-gray-400 hover:text-blue-600"><Edit className="w-4 h-4"/></button>
+                                    </div>
                                 </div>
-                                <div className="flex items-baseline gap-2 mt-1">
-                                    <span className="font-black text-gray-800">{product.isPromo ? product.promoPrice : product.price} F</span>
-                                    {product.isPromo && <span className="text-xs text-gray-400 line-through">{product.price} F</span>}
+                                <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="font-black text-gray-800">{product.isPromo ? product.promoPrice : product.price} F</span>
+                                        {product.isPromo && <span className="text-xs text-gray-400 line-through">{product.price} F</span>}
+                                    </div>
+                                    {margin !== null && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${margin > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                            {margin > 0 ? '+' : ''}{margin}%
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex items-end justify-between mt-2">
@@ -830,13 +931,14 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                     <button onClick={() => handleQuickStockUpdate(product, 1)} className="p-1 hover:bg-gray-200 rounded text-gray-500"><Plus className="w-4 h-4"/></button>
                                 </div>
                                 <div className="flex gap-2">
+                                    <button onClick={() => handleShareProduct(product)} className="p-2 rounded-lg bg-green-50 text-green-600 hover:bg-green-100"><Share2 className="w-4 h-4"/></button>
                                     <button onClick={() => handleTogglePromo(product)} className={`p-2 rounded-lg ${product.isPromo ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}><TicketPercent className="w-4 h-4"/></button>
                                     <button onClick={() => handleDuplicateProduct(product)} className="p-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100"><Copy className="w-4 h-4"/></button>
                                 </div>
                             </div>
                         </div>
                     </div>
-                ))}
+                )})}
             </div>
 
             {/* PRODUCT MODAL (WIZARD) */}
@@ -856,7 +958,9 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                 {wizardStep < 3 ? (
                                     <button type="button" onClick={() => setWizardStep(prev => prev + 1)} className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">Suivant</button>
                                 ) : (
-                                    <button type="submit" className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">Terminer</button>
+                                    <button type="submit" disabled={isSubmittingProduct} className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200 disabled:bg-gray-400 flex items-center justify-center">
+                                        {isSubmittingProduct ? <Loader2 className="w-5 h-5 animate-spin"/> : "Terminer"}
+                                    </button>
                                 )}
                             </div>
                         </form>
