@@ -42,24 +42,13 @@ export const signUpUser = async (email: string, password: string, metadata: any)
       ], { onConflict: 'id' });
 
     if (profileError) {
-      // Gestion des doublons lors de l'inscription initiale
       if (profileError.code === '23505') {
-         // Suppression du compte Auth orphelin si le profil échoue (nettoyage)
          await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
-         
-         if (profileError.message?.includes('unique_phone') || profileError.details?.includes('phone')) {
-             throw new Error("Ce numéro de téléphone est déjà utilisé.");
-         }
-         if (profileError.message?.includes('unique_kyc') || profileError.details?.includes('kyc_document')) {
-             throw new Error("Ce numéro de pièce d'identité est déjà enregistré.");
-         }
-         // Détection du doublon de nom (Insensible à la casse)
-         if (profileError.message?.includes('unique_name') || profileError.details?.includes('name')) {
-             throw new Error("Ce nom d'affichage est déjà pris (Même orthographe).");
-         }
+         if (profileError.message?.includes('unique_phone')) throw new Error("Ce numéro de téléphone est déjà utilisé.");
+         if (profileError.message?.includes('unique_name')) throw new Error("Ce nom d'affichage est déjà pris.");
+         if (profileError.message?.includes('unique_kyc_number')) throw new Error("Ce numéro de document d'identité est déjà enregistré.");
       }
-      console.error("Erreur création profil DB:", profileError);
-      throw new Error("Erreur technique lors de la création du profil. Réessayez.");
+      throw new Error("Erreur technique lors de la création du profil.");
     }
   }
 
@@ -72,9 +61,7 @@ export const signInUser = async (email: string, password: string) => {
     password,
   });
   if (error) {
-     if (error.message.includes("Invalid login credentials")) {
-         throw new Error("Email ou mot de passe incorrect.");
-     }
+     if (error.message.includes("Invalid login credentials")) throw new Error("Identifiant ou mot de passe incorrect.");
      throw error;
   }
   return data;
@@ -87,28 +74,57 @@ export const signOutUser = async () => {
 
 export const resetPasswordForEmail = async (email: string) => {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin, // Redirige vers l'app après clic sur le lien email
+    redirectTo: window.location.origin,
   });
   if (error) throw error;
 };
 
 export const updateUserPassword = async (newPassword: string, oldPassword?: string) => {
-  // Sécurité : Vérifier l'ancien mot de passe avant de changer
-  if (oldPassword) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && user.email) {
-          const { error: signInError } = await supabase.auth.signInWithPassword({
-              email: user.email,
-              password: oldPassword
-          });
-          if (signInError) {
-              throw new Error("L'ancien mot de passe est incorrect.");
-          }
+  // Sécurité Critique : Vérifier l'ancien mot de passe
+  if (!oldPassword) {
+      throw new Error("L'ancien mot de passe est obligatoire pour cette opération.");
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user && user.email) {
+      // Tentative de connexion avec l'ancien mot de passe pour vérifier
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: oldPassword
+      });
+      
+      if (signInError) {
+          throw new Error("L'ancien mot de passe est incorrect. Impossible de modifier.");
       }
   }
 
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw error;
+};
+
+export const deleteUserAccount = async (password: string) => {
+  // 1. Vérification de sécurité ultime : Re-authentification avec le mot de passe
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user || !user.email) throw new Error("Session invalide. Veuillez vous reconnecter.");
+
+  const { error: authError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: password
+  });
+
+  if (authError) {
+      throw new Error("Mot de passe incorrect. Suppression annulée.");
+  }
+
+  // 2. Appel de la fonction RPC sécurisée (définie en SQL) pour tout nettoyer
+  const { error } = await supabase.rpc('delete_own_account');
+  if (error) {
+      console.error("Delete account error:", error);
+      throw new Error("Impossible de supprimer le compte (Erreur serveur).");
+  }
+  
+  await signOutUser();
 };
 
 export const getCurrentUserProfile = async (userId: string) => {
@@ -119,10 +135,7 @@ export const getCurrentUserProfile = async (userId: string) => {
       .eq('id', userId)
       .maybeSingle();
 
-    if (error) {
-      console.error("Erreur fetch profil:", error);
-      return null;
-    }
+    if (error) return null;
     return data;
   } catch (e) {
     return null;
@@ -130,14 +143,12 @@ export const getCurrentUserProfile = async (userId: string) => {
 };
 
 export const updateUserProfile = async (userId: string, updates: Partial<VendorProfile>) => {
-  // Map camelCase to snake_case for DB
   const dbUpdates: any = {};
   if (updates.name) dbUpdates.name = updates.name;
   if (updates.phone) dbUpdates.phone = updates.phone;
   if (updates.bio) dbUpdates.bio = updates.bio;
   if (updates.photoUrl) dbUpdates.avatar_url = updates.photoUrl;
   
-  // Update Public Profile Table
   const { error } = await supabase
     .from('profiles')
     .update(dbUpdates)
@@ -145,27 +156,17 @@ export const updateUserProfile = async (userId: string, updates: Partial<VendorP
 
   if (error) {
       if (error.code === '23505') {
-         if (error.message?.includes('unique_phone')) {
-             throw new Error("Ce numéro de téléphone est déjà utilisé par un autre membre.");
-         }
-         if (error.message?.includes('unique_name') || error.details?.includes('name')) {
-             throw new Error("Ce nom d'affichage est déjà pris (Même orthographe).");
-         }
+         if (error.message?.includes('unique_name')) throw new Error("Ce nom est déjà pris.");
       }
       throw error;
   }
 
-  // If name changed, update Auth metadata too for consistency
   if (updates.name) {
-    await supabase.auth.updateUser({
-      data: { name: updates.name }
-    });
+    await supabase.auth.updateUser({ data: { name: updates.name } });
   }
 };
 
-
-// --- DATA FETCHING ---
-
+// ... (Rest of data fetching functions remain unchanged)
 export const fetchMarkets = async () => {
   const { data, error } = await supabase.from('markets').select('*');
   if (error) throw error;
@@ -236,8 +237,6 @@ export const fetchTransactions = async () => {
     provider: t.provider
   })) as Transaction[];
 };
-
-// --- DATA MUTATION ---
 
 export const createProduct = async (product: Omit<Product, 'id'>) => {
   const { stallId, name, price, category, stockQuantity, description, imageUrl, isPromo, promoPrice, ...details } = product;

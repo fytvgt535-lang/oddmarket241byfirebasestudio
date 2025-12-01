@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
 import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
-import { updateUserPassword, updateUserProfile } from '../services/supabaseService';
+import { updateUserPassword, updateUserProfile, deleteUserAccount } from '../services/supabaseService';
 
 interface VendorDashboardProps {
   profile: VendorProfile;
@@ -36,6 +36,12 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingPass, setIsSavingPass] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
+  
+  // DELETE ACCOUNT STATE
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // STORE MANAGEMENT STATE
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<string>('all');
@@ -91,10 +97,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
     if (!myStall) return 0;
     
     // Rent Debt Calculation
-    // Assuming last payment date. If null, assume long time ago.
     const lastPayment = myStall.lastPaymentDate || (Date.now() - 90 * 24 * 60 * 60 * 1000);
     const msSincePayment = Date.now() - lastPayment;
-    // Grace period of 30 days
     const monthsUnpaid = Math.floor(msSincePayment / (30 * 24 * 60 * 60 * 1000));
     const rentDebt = monthsUnpaid > 0 ? monthsUnpaid * myStall.price : 0;
 
@@ -120,8 +124,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
           });
           if (onUpdateProfile) onUpdateProfile(profileForm);
           setSettingsMsg({ type: 'success', text: 'Profil mis à jour avec succès !' });
-      } catch (err) {
-          setSettingsMsg({ type: 'error', text: 'Erreur lors de la mise à jour.' });
+      } catch (err: any) {
+          setSettingsMsg({ type: 'error', text: err.message || 'Erreur lors de la mise à jour.' });
       } finally {
           setIsSavingProfile(false);
       }
@@ -129,25 +133,52 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
 
   const handleChangePassword = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (!passForm.current) {
+          setSettingsMsg({ type: 'error', text: 'Veuillez saisir votre ancien mot de passe.' });
+          return;
+      }
       if (passForm.new !== passForm.confirm) {
-          setSettingsMsg({ type: 'error', text: 'Les mots de passe ne correspondent pas.' });
+          setSettingsMsg({ type: 'error', text: 'Les nouveaux mots de passe ne correspondent pas.' });
           return;
       }
       if (passForm.new.length < 6) {
-          setSettingsMsg({ type: 'error', text: 'Le mot de passe doit faire 6 caractères min.' });
+          setSettingsMsg({ type: 'error', text: 'Le nouveau mot de passe doit faire 6 caractères min.' });
           return;
       }
       
       setIsSavingPass(true);
       setSettingsMsg(null);
       try {
-          await updateUserPassword(passForm.new);
+          // Pass old password for verification
+          await updateUserPassword(passForm.new, passForm.current);
           setSettingsMsg({ type: 'success', text: 'Mot de passe modifié !' });
           setPassForm({ current: '', new: '', confirm: '' });
-      } catch (err) {
-          setSettingsMsg({ type: 'error', text: 'Erreur technique. Réessayez.' });
+      } catch (err: any) {
+          setSettingsMsg({ type: 'error', text: err.message || 'Erreur technique. Réessayez.' });
       } finally {
           setIsSavingPass(false);
+      }
+  };
+
+  const handleDeleteAccount = async () => {
+      if (deleteInput !== 'SUPPRIMER') {
+          alert("Veuillez saisir le mot SUPPRIMER en majuscules pour confirmer.");
+          return;
+      }
+      if (!deletePassword) {
+          alert("Le mot de passe est obligatoire pour supprimer le compte.");
+          return;
+      }
+
+      if (confirm("Êtes-vous absolument sûr ? Cette action est irréversible.")) {
+          setIsDeleting(true);
+          try {
+              await deleteUserAccount(deletePassword);
+              // App.tsx handles the logout via auth state change
+          } catch (err: any) {
+              alert(err.message || "Erreur lors de la suppression.");
+              setIsDeleting(false);
+          }
       }
   };
 
@@ -156,7 +187,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       const dummyUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200";
       if (onUpdateProfile) {
           onUpdateProfile({ photoUrl: dummyUrl });
-          // In real app, call updateUserProfile({ photoUrl: ... }) here
           updateUserProfile(profile.id, { photoUrl: dummyUrl });
       }
       alert("Photo mise à jour (Simulation)");
@@ -927,6 +957,18 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                    <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2">
                        <Lock className="w-5 h-5 text-orange-600"/> Sécurité
                    </h3>
+
+                    <div>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Ancien Mot de Passe (Requis)</label>
+                       <input 
+                          type="password" 
+                          value={passForm.current} 
+                          onChange={e => setPassForm({...passForm, current: e.target.value})}
+                          placeholder="••••••••"
+                          required
+                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
+                       />
+                   </div>
                    
                    <div>
                        <label className="text-xs font-bold text-gray-400 uppercase ml-1">Nouveau Mot de Passe</label>
@@ -939,7 +981,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                        />
                    </div>
                    <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Confirmer</label>
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Confirmer Nouveau</label>
                        <input 
                           type="password" 
                           value={passForm.confirm} 
@@ -951,7 +993,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
 
                    <button 
                       type="submit" 
-                      disabled={isSavingPass}
+                      disabled={isSavingPass || !passForm.current}
                       className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg disabled:bg-gray-300 flex items-center justify-center gap-2"
                    >
                        {isSavingPass ? "Modification..." : "Changer Mot de Passe"}
@@ -959,10 +1001,45 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                </form>
 
                {/* Danger Zone */}
-               <div className="pt-8">
-                   <button type="button" onClick={() => alert("Contactez la mairie pour supprimer votre compte.")} className="w-full py-3 text-red-500 font-bold text-sm hover:bg-red-50 rounded-xl transition-colors">
-                       Supprimer mon compte
-                   </button>
+               <div className="pt-8 bg-red-50 p-6 rounded-3xl border border-red-100">
+                    <h3 className="font-bold text-red-800 text-lg flex items-center gap-2 mb-4">
+                       <AlertTriangle className="w-5 h-5"/> Zone de Danger
+                   </h3>
+                   <p className="text-sm text-red-600 mb-4">
+                       La suppression est définitive. Vous perdrez votre historique, vos produits et votre solde.
+                   </p>
+                   {!showDeleteConfirm ? (
+                       <button type="button" onClick={() => setShowDeleteConfirm(true)} className="w-full py-3 bg-white border border-red-200 text-red-600 font-bold text-sm hover:bg-red-100 rounded-xl transition-colors">
+                           Supprimer mon compte
+                       </button>
+                   ) : (
+                       <div className="space-y-3 animate-fade-in">
+                           <p className="text-xs font-bold text-red-800 uppercase">Pour confirmer, écrivez "SUPPRIMER" :</p>
+                           <input 
+                                type="text" 
+                                value={deleteInput}
+                                onChange={e => setDeleteInput(e.target.value)}
+                                placeholder="SUPPRIMER"
+                                className="w-full p-3 bg-white border border-red-300 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"
+                           />
+                           
+                           <p className="text-xs font-bold text-red-800 uppercase mt-2">Mot de passe de sécurité :</p>
+                           <input 
+                                type="password" 
+                                value={deletePassword}
+                                onChange={e => setDeletePassword(e.target.value)}
+                                placeholder="Votre mot de passe"
+                                className="w-full p-3 bg-white border border-red-300 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"
+                           />
+
+                           <div className="flex gap-2 mt-4">
+                               <button onClick={() => { setShowDeleteConfirm(false); setDeleteInput(''); setDeletePassword(''); }} className="flex-1 py-3 bg-gray-200 text-gray-600 font-bold rounded-xl">Annuler</button>
+                               <button onClick={handleDeleteAccount} disabled={deleteInput !== 'SUPPRIMER' || !deletePassword || isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl disabled:bg-red-300">
+                                   {isDeleting ? "Adieu..." : "Confirmer"}
+                               </button>
+                           </div>
+                       </div>
+                   )}
                </div>
            </div>
       )}

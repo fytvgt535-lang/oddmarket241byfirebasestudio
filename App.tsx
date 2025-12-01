@@ -71,12 +71,13 @@ const App: React.FC = () => {
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setCurrentUser(null);
+      if (event === 'SIGNED_OUT' || !session) {
+          setCurrentUser(null);
+          setAuthView('login');
+      } else if (session?.user) {
+          fetchUserProfile(session.user.id);
       }
     });
 
@@ -181,7 +182,7 @@ const App: React.FC = () => {
     try {
       await SupabaseService.signInUser(email, pass);
     } catch (error: any) {
-      setLoginError("Email ou mot de passe incorrect.");
+      setLoginError(error.message || "Email ou mot de passe incorrect.");
     } finally {
       setIsAuthLoading(false);
     }
@@ -217,8 +218,7 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await SupabaseService.signOutUser();
-    setCurrentUser(null);
-    setAuthView('login');
+    // Logic handled by onAuthStateChange
   };
 
   const handleAddProduct = async (productData: Omit<Product, 'id'>) => {
