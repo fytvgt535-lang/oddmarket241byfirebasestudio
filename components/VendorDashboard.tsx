@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Transaction, Stall, HygieneReport, VendorProfile, Sanction, PaymentPlan, Receipt, Product, ClientOrder, AppNotification } from '../types';
-import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut } from 'lucide-react';
+import { Download, CheckCircle, Clock, MapPin, ShieldCheck, User, QrCode, Star, AlertTriangle, HeartHandshake, History, Sparkles, FileText, Lock, ShoppingBag, Plus, Trash2, Edit, Package, Bell, X, Gavel, Scale, Truck, Settings, Image as ImageIcon, Box, Mic, Volume2, Minus, CreditCard, Calendar, BarChart, Tag, TicketPercent, Search, Filter, ArrowUpDown, Copy, RefreshCw, AlertCircle, Scan, Camera, Save, LogOut, Loader2 } from 'lucide-react';
 import { generateVendorCoachTip } from '../services/geminiService';
-import { updateUserPassword, updateUserProfile, deleteUserAccount } from '../services/supabaseService';
+import { updateUserPassword, updateUserProfile, deleteUserAccount, uploadFile } from '../services/supabaseService';
 
 interface VendorDashboardProps {
   profile: VendorProfile;
@@ -37,11 +37,16 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   const [isSavingPass, setIsSavingPass] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
   
+  // IMAGE UPLOAD STATE
+  const profileImageInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingProfilePhoto, setIsUploadingProfilePhoto] = useState(false);
+  
   // DELETE ACCOUNT STATE
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // STORE MANAGEMENT STATE
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<string>('all');
@@ -51,6 +56,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   // PRODUCT FORM STATE
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingProductPhoto, setIsUploadingProductPhoto] = useState(false);
   
   // SECURE PAYMENT STATE
   const [isPayingDebt, setIsPayingDebt] = useState(false);
@@ -89,7 +96,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
   }, [profile.id]);
 
   const handleSpeak = (text: string) => {
-      alert(`[🔊 AUDIO]: "${text}"`);
+      // Simple simulation alert
+      // alert(`[🔊 AUDIO]: "${text}"`);
   };
 
   // --- CALCULATE DEBT ---
@@ -162,56 +170,64 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
 
   const handleDeleteAccount = async () => {
       if (deleteInput !== 'SUPPRIMER') {
-          alert("Veuillez saisir le mot SUPPRIMER en majuscules pour confirmer.");
+          setDeleteError("Vous devez écrire le mot SUPPRIMER en majuscules.");
           return;
       }
       if (!deletePassword) {
-          alert("Le mot de passe est obligatoire pour supprimer le compte.");
+          setDeleteError("Le mot de passe est obligatoire pour confirmer.");
           return;
       }
 
-      if (confirm("Êtes-vous absolument sûr ? Cette action est irréversible.")) {
-          setIsDeleting(true);
-          try {
-              await deleteUserAccount(deletePassword);
-              // App.tsx handles the logout via auth state change
-          } catch (err: any) {
-              alert(err.message || "Erreur lors de la suppression.");
-              setIsDeleting(false);
-          }
+      setDeleteError(null);
+      setIsDeleting(true);
+
+      try {
+          await deleteUserAccount(deletePassword);
+          // App.tsx handles redirect on session loss
+      } catch (err: any) {
+          setDeleteError(err.message || "Erreur lors de la suppression.");
+          setIsDeleting(false);
       }
   };
 
-  const handlePhotoUpload = () => {
-      // Simulate photo upload
-      const dummyUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200";
-      if (onUpdateProfile) {
-          onUpdateProfile({ photoUrl: dummyUrl });
-          updateUserProfile(profile.id, { photoUrl: dummyUrl });
+  // REAL PHOTO UPLOAD
+  const handleProfilePhotoClick = () => {
+      profileImageInputRef.current?.click();
+  };
+
+  const handleProfileImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      
+      const file = e.target.files[0];
+      setIsUploadingProfilePhoto(true);
+      setSettingsMsg(null);
+
+      try {
+          const publicUrl = await uploadFile(file, 'avatars');
+          await updateUserProfile(profile.id, { photoUrl: publicUrl });
+          if (onUpdateProfile) onUpdateProfile({ photoUrl: publicUrl });
+          setSettingsMsg({ type: 'success', text: 'Photo de profil mise à jour !' });
+      } catch (error: any) {
+          setSettingsMsg({ type: 'error', text: "Erreur upload : " + error.message });
+      } finally {
+          setIsUploadingProfilePhoto(false);
       }
-      alert("Photo mise à jour (Simulation)");
   };
 
 
   // --- STORE LOGIC ---
   const myProducts = products.filter(p => p.stallId === myStall?.id);
   
-  // Derived Categories
   const availableCategories = useMemo(() => {
       const cats = new Set(myProducts.map(p => p.category));
       return ['all', ...Array.from(cats)];
   }, [myProducts]);
 
-  // Filtering & Sorting
   const filteredProducts = useMemo(() => {
       let result = myProducts;
-      
-      // Filter by Category
       if (storeCategoryFilter !== 'all') {
           result = result.filter(p => p.category === storeCategoryFilter);
       }
-
-      // Filter by Search
       if (storeSearch) {
           const lower = storeSearch.toLowerCase();
           result = result.filter(p => 
@@ -220,27 +236,24 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
               p.tags?.some(t => t.toLowerCase().includes(lower))
           );
       }
-
-      // Sort
       return result.sort((a, b) => {
           switch (storeSort) {
               case 'price_high': return b.price - a.price;
               case 'price_low': return a.price - b.price;
-              case 'stock_low': return a.stockQuantity - b.stockQuantity; // Low stock first
+              case 'stock_low': return a.stockQuantity - b.stockQuantity;
               case 'name': return a.name.localeCompare(b.name);
               default: return 0;
           }
       });
   }, [myProducts, storeCategoryFilter, storeSearch, storeSort]);
 
-  // Stats
   const stockValue = useMemo(() => myProducts.reduce((acc, p) => acc + (p.price * p.stockQuantity), 0), [myProducts]);
   const lowStockCount = useMemo(() => myProducts.filter(p => p.stockQuantity < 5).length, [myProducts]);
 
 
   const handleOpenProductModal = (product?: Product) => {
       setWizardStep(1);
-      setIsWizardActive(true); // Always use wizard for now
+      setIsWizardActive(true);
       if (product) {
           setEditingProduct(product);
           setProductForm({
@@ -271,17 +284,15 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       onAddProduct({
           ...product,
           name: `${product.name} (Copie)`,
-          stockQuantity: 0, // Reset stock for copy
+          stockQuantity: 0,
           inStock: false
       });
-      handleSpeak("Produit dupliqué. Vous pouvez modifier la copie.");
   };
 
   const handleTogglePromo = (product: Product) => {
       if (product.isPromo) {
           onUpdateProduct(product.id, { isPromo: false });
       } else {
-          // If no promo price set, set a default 10% off
           const promoP = product.promoPrice || Math.floor(product.price * 0.9);
           onUpdateProduct(product.id, { isPromo: true, promoPrice: promoP });
       }
@@ -292,6 +303,25 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       onUpdateProduct(product.id, { stockQuantity: newQty, inStock: newQty > 0 });
   };
 
+  // PRODUCT PHOTO UPLOAD
+  const handleProductPhotoClick = () => {
+      productImageInputRef.current?.click();
+  };
+
+  const handleProductImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      const file = e.target.files[0];
+      setIsUploadingProductPhoto(true);
+      try {
+          const publicUrl = await uploadFile(file, 'products');
+          setProductForm(prev => ({ ...prev, imageUrl: publicUrl }));
+      } catch (error: any) {
+          alert("Erreur upload: " + error.message);
+      } finally {
+          setIsUploadingProductPhoto(false);
+      }
+  };
+
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!myStall) return;
@@ -299,7 +329,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
     const tags = productForm.tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0);
     const promoPriceNum = productForm.isPromo && productForm.promoPrice ? Number(productForm.promoPrice) : undefined;
     
-    // Construct Wholesale logic
     let wholesalePrices = undefined;
     if (productForm.wholesaleQty && productForm.wholesalePrice) {
         wholesalePrices = [{ minQuantity: Number(productForm.wholesaleQty), price: Number(productForm.wholesalePrice) }];
@@ -334,19 +363,15 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
     setIsProductModalOpen(false);
   };
   
-  // Secure Payment Logic
   const handleScanAgent = () => {
       setIsScanMode(true);
       setTimeout(() => {
           setIsScanMode(false);
           setAgentScanned(true);
-          alert("Agent Authentifié. Paiement Cash débloqué.");
       }, 1500);
   };
 
-  const myOrders = orders.filter(o => o.stallId === myStall?.id).sort((a,b) => b.date - a.date);
   const unreadNotifs = notifications.filter(n => !n.read).length;
-
   const daysRemaining = profile.subscriptionExpiry 
     ? Math.ceil((profile.subscriptionExpiry - Date.now()) / (1000 * 60 * 60 * 24)) 
     : 0;
@@ -511,19 +536,25 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                         />
                     </div>
                     
-                    {/* Simulated Image */}
-                    <div className="bg-gray-50 p-4 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 gap-2 cursor-pointer hover:bg-gray-100">
-                        <div className="bg-white p-3 rounded-full shadow-sm">
-                            <ImageIcon className="w-6 h-6 text-gray-600"/>
-                        </div>
-                        <span className="text-xs font-bold">Appuyer pour photo (Simulé)</span>
-                        <input 
-                            type="text" 
-                            value={productForm.imageUrl} 
-                            onChange={e => setProductForm({...productForm, imageUrl: e.target.value})}
-                            placeholder="Ou coller URL ici"
-                            className="w-full text-center bg-transparent text-xs outline-none"
-                        />
+                    {/* Real Image Upload */}
+                    <input 
+                        type="file" 
+                        ref={productImageInputRef} 
+                        className="hidden" 
+                        accept="image/*" 
+                        onChange={handleProductImageChange} 
+                    />
+                    <div onClick={handleProductPhotoClick} className="bg-gray-50 p-4 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 gap-2 cursor-pointer hover:bg-gray-100 relative overflow-hidden">
+                        {productForm.imageUrl ? (
+                            <img src={productForm.imageUrl} className="w-full h-32 object-cover rounded-xl" alt="Product" />
+                        ) : (
+                            <>
+                                <div className="bg-white p-3 rounded-full shadow-sm">
+                                    {isUploadingProductPhoto ? <Loader2 className="w-6 h-6 animate-spin text-green-600"/> : <ImageIcon className="w-6 h-6 text-gray-600"/>}
+                                </div>
+                                <span className="text-xs font-bold">{isUploadingProductPhoto ? "Envoi en cours..." : "Ajouter Photo"}</span>
+                            </>
+                        )}
                     </div>
                 </div>
              );
@@ -537,7 +568,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       {/* HEADER */}
       <div className="flex justify-between items-center bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
-               <button onClick={() => handleSpeak("Bienvenue dans votre espace. Appuyez sur les icônes pour naviguer.")} className="bg-blue-100 text-blue-600 p-3 rounded-full active:scale-95 transition-transform">
+               <button onClick={() => handleSpeak("Bienvenue dans votre espace.")} className="bg-blue-100 text-blue-600 p-3 rounded-full active:scale-95 transition-transform">
                    <Volume2 className="w-6 h-6" />
                </button>
                <div>
@@ -573,7 +604,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
         ))}
       </div>
 
-      {/* --- TAB 1: OVERVIEW (ID + ALERTS) --- */}
+      {/* --- TAB 1: OVERVIEW --- */}
       {activeTab === 'overview' && (
       <div className="space-y-4 animate-fade-in">
         
@@ -600,7 +631,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                         <div className="bg-green-50 p-6 rounded-3xl border border-green-200 animate-fade-in">
                             <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2 text-green-600"><ShieldCheck className="w-8 h-8"/></div>
                             <p className="text-green-800 font-bold mb-4">Agent Authentifié</p>
-                            <button onClick={() => { setIsPayingDebt(false); setAgentScanned(false); alert("Paiement validé par l'agent."); }} className="w-full py-4 bg-green-600 text-white font-bold rounded-xl shadow-lg">
+                            <button onClick={() => { setIsPayingDebt(false); setAgentScanned(false); }} className="w-full py-4 bg-green-600 text-white font-bold rounded-xl shadow-lg">
                                 Remettre Espèces
                             </button>
                         </div>
@@ -640,7 +671,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                 </div>
             )}
              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleSpeak("Voici votre QR Code unique. Montrez-le aux agents pour tout contrôle.")} className="bg-blue-600 active:bg-blue-700 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                <button onClick={() => handleSpeak("Voici votre QR Code unique.")} className="bg-blue-600 active:bg-blue-700 text-white p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-lg shadow-blue-200">
                     <QrCode className="w-8 h-8" />
                     <span className="font-bold">Mon QR</span>
                 </button>
@@ -658,7 +689,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
             </div>
         </div>
         
-        {/* AI Tip Card */}
         {aiTip && (
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-4 rounded-2xl text-white shadow-lg relative overflow-hidden">
                 <Sparkles className="absolute top-2 right-2 text-white/20 w-12 h-12"/>
@@ -669,11 +699,10 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       </div>
       )}
 
-      {/* --- TAB 2: STORE (RAYONS INTELLIGENTS) --- */}
+      {/* --- TAB 2: STORE --- */}
       {activeTab === 'store' && (
         <div className="space-y-6 animate-fade-in">
-            
-            {/* 1. STOCK DASHBOARD */}
+            {/* ... (Existing Store Code: Stats, Action Bar, Filter) ... */}
             <div className="grid grid-cols-2 gap-3">
                 <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
                     <p className="text-xs font-bold text-gray-400 uppercase">Valeur Stock</p>
@@ -685,12 +714,11 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                 </div>
             </div>
 
-            {/* 2. ACTION BAR */}
             <div className="flex gap-3">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-3.5 w-5 h-5 text-gray-400"/>
                     <input 
-                        placeholder="Rechercher produit..." 
+                        placeholder="Rechercher..." 
                         value={storeSearch}
                         onChange={(e) => setStoreSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-gray-100 shadow-sm outline-none focus:ring-2 focus:ring-purple-500"
@@ -701,7 +729,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                 </button>
             </div>
 
-            {/* 3. SHELF FILTERS (Catégories) */}
             <div className="overflow-x-auto pb-2 no-scrollbar">
                 <div className="flex gap-2">
                     {availableCategories.map(cat => (
@@ -712,28 +739,23 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                 ${storeCategoryFilter === cat ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-gray-100 text-gray-500'}
                             `}
                         >
-                            {cat === 'all' ? 'Tout le stock' : cat}
+                            {cat === 'all' ? 'Tout' : cat}
                         </button>
                     ))}
                 </div>
             </div>
 
-            {/* 4. TOOLS (Sort) */}
             <div className="flex justify-between items-center text-xs font-bold text-gray-400 px-2">
-                <span>{filteredProducts.length} produits trouvés</span>
+                <span>{filteredProducts.length} produits</span>
                 <button onClick={() => setStoreSort(prev => prev === 'stock_low' ? 'price_high' : 'stock_low')} className="flex items-center gap-1 hover:text-purple-600">
-                    <ArrowUpDown className="w-3 h-3"/> {storeSort === 'stock_low' ? 'Urgence Stock' : 'Prix'}
+                    <ArrowUpDown className="w-3 h-3"/> {storeSort === 'stock_low' ? 'Urgence' : 'Prix'}
                 </button>
             </div>
 
-            {/* 5. VISUAL INVENTORY GRID */}
             <div className="space-y-3 pb-24">
                 {filteredProducts.map(product => (
                     <div key={product.id} className="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex gap-4 items-stretch relative overflow-hidden">
-                        {/* Status Bar Indicator */}
                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${product.stockQuantity === 0 ? 'bg-red-500' : product.stockQuantity < 5 ? 'bg-orange-500' : 'bg-green-500'}`}></div>
-
-                        {/* Image */}
                         <div className="w-24 h-24 bg-gray-50 rounded-xl shrink-0 overflow-hidden relative group self-center">
                              {product.imageUrl ? (
                                 <img src={product.imageUrl} className="w-full h-full object-cover"/>
@@ -746,8 +768,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                  <span className="absolute top-0 left-0 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-br-lg z-10">PROMO</span>
                              )}
                         </div>
-
-                        {/* Content */}
                         <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
                             <div>
                                 <div className="flex justify-between items-start">
@@ -759,43 +779,20 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                                     {product.isPromo && <span className="text-xs text-gray-400 line-through">{product.price} F</span>}
                                 </div>
                             </div>
-                            
-                            {/* Stock & Quick Actions */}
                             <div className="flex items-end justify-between mt-2">
                                 <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1 border border-gray-100">
                                     <button onClick={() => handleQuickStockUpdate(product, -1)} className="p-1 hover:bg-gray-200 rounded text-gray-500"><Minus className="w-4 h-4"/></button>
                                     <span className={`font-bold w-6 text-center ${product.stockQuantity < 5 ? 'text-red-600' : 'text-gray-800'}`}>{product.stockQuantity}</span>
                                     <button onClick={() => handleQuickStockUpdate(product, 1)} className="p-1 hover:bg-gray-200 rounded text-gray-500"><Plus className="w-4 h-4"/></button>
                                 </div>
-
                                 <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => handleTogglePromo(product)}
-                                        className={`p-2 rounded-lg ${product.isPromo ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}
-                                        title="Activer/Désactiver Promo"
-                                    >
-                                        <TicketPercent className="w-4 h-4"/>
-                                    </button>
-                                    <button 
-                                        onClick={() => handleDuplicateProduct(product)}
-                                        className="p-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100"
-                                        title="Dupliquer"
-                                    >
-                                        <Copy className="w-4 h-4"/>
-                                    </button>
+                                    <button onClick={() => handleTogglePromo(product)} className={`p-2 rounded-lg ${product.isPromo ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}><TicketPercent className="w-4 h-4"/></button>
+                                    <button onClick={() => handleDuplicateProduct(product)} className="p-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100"><Copy className="w-4 h-4"/></button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 ))}
-
-                {filteredProducts.length === 0 && (
-                    <div className="text-center py-12">
-                        <Package className="w-16 h-16 text-gray-200 mx-auto mb-4"/>
-                        <p className="text-gray-400">Rayon vide.</p>
-                        <button onClick={() => handleOpenProductModal()} className="mt-4 text-purple-600 font-bold text-sm">Ajouter un produit</button>
-                    </div>
-                )}
             </div>
 
             {/* PRODUCT MODAL (WIZARD) */}
@@ -803,31 +800,19 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                 <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
                     <div className="bg-white rounded-3xl p-6 w-full max-w-sm animate-fade-in relative my-auto">
                         <button onClick={() => setIsProductModalOpen(false)} className="absolute top-4 right-4 bg-gray-100 p-2 rounded-full z-10"><X className="w-5 h-5"/></button>
-                        
-                        {/* Progress */}
                         <div className="flex justify-center gap-2 mb-6 mt-2">
                              {[1, 2, 3].map(step => (
                                  <div key={step} className={`h-1.5 w-8 rounded-full ${step <= wizardStep ? 'bg-green-500' : 'bg-gray-200'}`}></div>
                              ))}
                         </div>
-
                         <form onSubmit={handleProductSubmit}>
                             {renderWizardStep()}
-
                             <div className="mt-8 flex gap-3">
-                                {wizardStep > 1 && (
-                                    <button type="button" onClick={() => setWizardStep(prev => prev - 1)} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">
-                                        Retour
-                                    </button>
-                                )}
+                                {wizardStep > 1 && <button type="button" onClick={() => setWizardStep(prev => prev - 1)} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">Retour</button>}
                                 {wizardStep < 3 ? (
-                                    <button type="button" onClick={() => setWizardStep(prev => prev + 1)} className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">
-                                        Suivant
-                                    </button>
+                                    <button type="button" onClick={() => setWizardStep(prev => prev + 1)} className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">Suivant</button>
                                 ) : (
-                                    <button type="submit" className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">
-                                        Terminer
-                                    </button>
+                                    <button type="submit" className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold shadow-lg shadow-green-200">Terminer</button>
                                 )}
                             </div>
                         </form>
@@ -851,13 +836,9 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                               <h3 className="text-2xl font-black">{profile.isLogisticsSubscribed ? 'ACTIF' : 'INACTIF'}</h3>
                           </div>
                       </div>
-
                       {profile.isLogisticsSubscribed ? (
                           <div>
-                              <div className="flex justify-between text-xs font-bold mb-1 text-orange-100">
-                                  <span>Temps Restant</span>
-                                  <span>{daysRemaining} jours</span>
-                              </div>
+                              <div className="flex justify-between text-xs font-bold mb-1 text-orange-100"><span>Temps Restant</span><span>{daysRemaining} jours</span></div>
                               <div className="w-full bg-black/20 h-3 rounded-full overflow-hidden">
                                   <div className="bg-white h-full rounded-full" style={{width: `${getSubscriptionProgress()}%`}}></div>
                               </div>
@@ -866,12 +847,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                       ) : (
                           <div>
                               <p className="text-slate-300 text-sm mb-4">Activez la livraison pour vendre à distance.</p>
-                              <button 
-                                onClick={() => onToggleLogistics && onToggleLogistics(true)}
-                                className="w-full py-3 bg-white text-slate-900 font-bold rounded-xl active:scale-95 transition-transform"
-                              >
-                                  Activer (5000 F)
-                              </button>
+                              <button onClick={() => onToggleLogistics && onToggleLogistics(true)} className="w-full py-3 bg-white text-slate-900 font-bold rounded-xl active:scale-95 transition-transform">Activer (5000 F)</button>
                           </div>
                       )}
                   </div>
@@ -882,7 +858,6 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
       {/* --- TAB 4: SETTINGS --- */}
       {activeTab === 'settings' && (
            <div className="space-y-6 animate-fade-in">
-               {/* Feedback Message */}
                {settingsMsg && (
                    <div className={`p-4 rounded-xl flex items-center gap-3 ${settingsMsg.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                        {settingsMsg.type === 'success' ? <CheckCircle className="w-5 h-5"/> : <AlertTriangle className="w-5 h-5"/>}
@@ -890,9 +865,15 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                    </div>
                )}
 
-               {/* Profile Photo */}
+               <input 
+                  type="file" 
+                  ref={profileImageInputRef} 
+                  className="hidden" 
+                  accept="image/*" 
+                  onChange={handleProfileImageChange} 
+               />
                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center">
-                   <div onClick={handlePhotoUpload} className="relative cursor-pointer group">
+                   <div onClick={handleProfilePhotoClick} className="relative cursor-pointer group">
                        <div className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden border-4 border-white shadow-lg">
                            {profile.photoUrl ? (
                                <img src={profile.photoUrl} alt="Avatar" className="w-full h-full object-cover"/>
@@ -903,140 +884,41 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
                            )}
                        </div>
                        <div className="absolute bottom-0 right-0 bg-white p-2 rounded-full shadow-md border border-gray-200 group-hover:scale-110 transition-transform">
-                           <Camera className="w-4 h-4 text-gray-600"/>
+                           {isUploadingProfilePhoto ? <Loader2 className="w-4 h-4 animate-spin text-gray-600"/> : <Camera className="w-4 h-4 text-gray-600"/>}
                        </div>
                    </div>
                    <p className="mt-3 text-xs text-gray-400">Appuyez pour changer</p>
                </div>
 
-               {/* Personal Info Form */}
                <form onSubmit={handleUpdateProfile} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2">
-                       <User className="w-5 h-5 text-blue-600"/> Mes Infos
-                   </h3>
-                   
-                   <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Nom d'affichage</label>
-                       <input 
-                          type="text" 
-                          value={profileForm.name} 
-                          onChange={e => setProfileForm({...profileForm, name: e.target.value})}
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"
-                       />
-                   </div>
-                   <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Téléphone</label>
-                       <input 
-                          type="tel" 
-                          value={profileForm.phone} 
-                          onChange={e => setProfileForm({...profileForm, phone: e.target.value})}
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"
-                       />
-                   </div>
-                   <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Bio Boutique</label>
-                       <textarea 
-                          value={profileForm.bio} 
-                          onChange={e => setProfileForm({...profileForm, bio: e.target.value})}
-                          placeholder="Décrivez votre étal..."
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium text-gray-700 h-24 resize-none"
-                       />
-                   </div>
-                   
-                   <button 
-                      type="submit" 
-                      disabled={isSavingProfile}
-                      className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 disabled:bg-gray-300 flex items-center justify-center gap-2"
-                   >
-                       {isSavingProfile ? "Enregistrement..." : <><Save className="w-4 h-4"/> Enregistrer</>}
-                   </button>
+                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2"><User className="w-5 h-5 text-blue-600"/> Mes Infos</h3>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Nom d'affichage</label><input type="text" value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"/></div>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Téléphone</label><input type="tel" value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-800"/></div>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Bio Boutique</label><textarea value={profileForm.bio} onChange={e => setProfileForm({...profileForm, bio: e.target.value})} placeholder="Décrivez votre étal..." className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium text-gray-700 h-24 resize-none"/></div>
+                   <button type="submit" disabled={isSavingProfile} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 disabled:bg-gray-300 flex items-center justify-center gap-2">{isSavingProfile ? "Enregistrement..." : <><Save className="w-4 h-4"/> Enregistrer</>}</button>
                </form>
 
-               {/* Password Form */}
                <form onSubmit={handleChangePassword} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2">
-                       <Lock className="w-5 h-5 text-orange-600"/> Sécurité
-                   </h3>
-
-                    <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Ancien Mot de Passe (Requis)</label>
-                       <input 
-                          type="password" 
-                          value={passForm.current} 
-                          onChange={e => setPassForm({...passForm, current: e.target.value})}
-                          placeholder="••••••••"
-                          required
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
-                       />
-                   </div>
-                   
-                   <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Nouveau Mot de Passe</label>
-                       <input 
-                          type="password" 
-                          value={passForm.new} 
-                          onChange={e => setPassForm({...passForm, new: e.target.value})}
-                          placeholder="••••••••"
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
-                       />
-                   </div>
-                   <div>
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-1">Confirmer Nouveau</label>
-                       <input 
-                          type="password" 
-                          value={passForm.confirm} 
-                          onChange={e => setPassForm({...passForm, confirm: e.target.value})}
-                          placeholder="••••••••"
-                          className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"
-                       />
-                   </div>
-
-                   <button 
-                      type="submit" 
-                      disabled={isSavingPass || !passForm.current}
-                      className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg disabled:bg-gray-300 flex items-center justify-center gap-2"
-                   >
-                       {isSavingPass ? "Modification..." : "Changer Mot de Passe"}
-                   </button>
+                   <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2 border-b border-gray-100 pb-2"><Lock className="w-5 h-5 text-orange-600"/> Sécurité</h3>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Ancien Mot de Passe (Requis)</label><input type="password" value={passForm.current} onChange={e => setPassForm({...passForm, current: e.target.value})} placeholder="••••••••" required className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"/></div>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Nouveau Mot de Passe</label><input type="password" value={passForm.new} onChange={e => setPassForm({...passForm, new: e.target.value})} placeholder="••••••••" className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"/></div>
+                   <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Confirmer Nouveau</label><input type="password" value={passForm.confirm} onChange={e => setPassForm({...passForm, confirm: e.target.value})} placeholder="••••••••" className="w-full p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-orange-500 font-bold text-gray-800"/></div>
+                   <button type="submit" disabled={isSavingPass || !passForm.current} className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg disabled:bg-gray-300 flex items-center justify-center gap-2">{isSavingPass ? "Modification..." : "Changer Mot de Passe"}</button>
                </form>
 
-               {/* Danger Zone */}
                <div className="pt-8 bg-red-50 p-6 rounded-3xl border border-red-100">
-                    <h3 className="font-bold text-red-800 text-lg flex items-center gap-2 mb-4">
-                       <AlertTriangle className="w-5 h-5"/> Zone de Danger
-                   </h3>
-                   <p className="text-sm text-red-600 mb-4">
-                       La suppression est définitive. Vous perdrez votre historique, vos produits et votre solde.
-                   </p>
+                    <h3 className="font-bold text-red-800 text-lg flex items-center gap-2 mb-4"><AlertTriangle className="w-5 h-5"/> Zone de Danger</h3>
+                   <p className="text-sm text-red-600 mb-4">La suppression est définitive.</p>
                    {!showDeleteConfirm ? (
-                       <button type="button" onClick={() => setShowDeleteConfirm(true)} className="w-full py-3 bg-white border border-red-200 text-red-600 font-bold text-sm hover:bg-red-100 rounded-xl transition-colors">
-                           Supprimer mon compte
-                       </button>
+                       <button type="button" onClick={() => setShowDeleteConfirm(true)} className="w-full py-3 bg-white border border-red-200 text-red-600 font-bold text-sm hover:bg-red-100 rounded-xl transition-colors">Supprimer mon compte</button>
                    ) : (
-                       <div className="space-y-3 animate-fade-in">
-                           <p className="text-xs font-bold text-red-800 uppercase">Pour confirmer, écrivez "SUPPRIMER" :</p>
-                           <input 
-                                type="text" 
-                                value={deleteInput}
-                                onChange={e => setDeleteInput(e.target.value)}
-                                placeholder="SUPPRIMER"
-                                className="w-full p-3 bg-white border border-red-300 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"
-                           />
-                           
-                           <p className="text-xs font-bold text-red-800 uppercase mt-2">Mot de passe de sécurité :</p>
-                           <input 
-                                type="password" 
-                                value={deletePassword}
-                                onChange={e => setDeletePassword(e.target.value)}
-                                placeholder="Votre mot de passe"
-                                className="w-full p-3 bg-white border border-red-300 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"
-                           />
-
-                           <div className="flex gap-2 mt-4">
-                               <button onClick={() => { setShowDeleteConfirm(false); setDeleteInput(''); setDeletePassword(''); }} className="flex-1 py-3 bg-gray-200 text-gray-600 font-bold rounded-xl">Annuler</button>
-                               <button onClick={handleDeleteAccount} disabled={deleteInput !== 'SUPPRIMER' || !deletePassword || isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl disabled:bg-red-300">
-                                   {isDeleting ? "Adieu..." : "Confirmer"}
-                               </button>
+                       <div className="space-y-4 animate-fade-in bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                           <div><label className="block text-xs font-bold text-red-800 uppercase mb-1">Pour confirmer, écrivez "SUPPRIMER"</label><input type="text" value={deleteInput} onChange={e => setDeleteInput(e.target.value)} placeholder="SUPPRIMER" className="w-full p-3 bg-red-50 border border-red-200 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"/></div>
+                           <div><label className="block text-xs font-bold text-red-800 uppercase mb-1">Mot de passe actuel (Sécurité)</label><input type="password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} placeholder="Votre mot de passe" className="w-full p-3 bg-red-50 border border-red-200 rounded-xl font-bold text-red-600 focus:ring-2 focus:ring-red-500 outline-none"/></div>
+                           {deleteError && <div className="p-3 bg-red-100 rounded-lg text-xs font-bold text-red-700 flex items-center gap-2"><X className="w-4 h-4"/> {deleteError}</div>}
+                           <div className="flex gap-2 pt-2">
+                               <button onClick={() => { setShowDeleteConfirm(false); setDeleteInput(''); setDeletePassword(''); setDeleteError(null); }} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200">Annuler</button>
+                               <button onClick={handleDeleteAccount} disabled={deleteInput !== 'SUPPRIMER' || !deletePassword || isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl disabled:bg-red-300 shadow-lg shadow-red-200">{isDeleting ? "Suppression..." : "Confirmer Définitivement"}</button>
                            </div>
                        </div>
                    )}

@@ -2,7 +2,111 @@
 import { supabase } from '../supabaseClient';
 import { User, VendorProfile, Market, Stall, Product, Transaction, AppRole } from '../types';
 
+// --- COMPRESSION UTILITY ---
+const compressImage = async (file: File, maxWidth = 1000, quality = 0.7): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const elem = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+
+        elem.width = width;
+        elem.height = height;
+        const ctx = elem.getContext('2d');
+        
+        if (!ctx) {
+            reject(new Error("Canvas context not available"));
+            return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Output as JPEG with reduced quality
+        ctx.canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Compression failed'));
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
+// --- STORAGE ---
+
+export const uploadFile = async (file: File, bucket: 'avatars' | 'products'): Promise<string> => {
+  try {
+    // 1. Compress Image
+    const compressedBlob = await compressImage(file);
+    
+    // 2. Generate Path
+    const fileExt = 'jpg'; // Always converting to JPG for consistency/size
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    // 3. Upload to Supabase
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, compressedBlob, {
+        contentType: 'image/jpeg',
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error("Supabase Storage Error:", uploadError);
+      throw new Error(`Erreur upload: ${uploadError.message}`);
+    }
+
+    // 4. Get Public URL
+    const { data } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  } catch (error: any) {
+    console.error("Upload process failed:", error);
+    throw error;
+  }
+};
+
 // --- AUTHENTICATION ---
+
+export const checkValueExists = async (field: 'email' | 'name' | 'phone', value: string): Promise<boolean> => {
+  if (!value) return false;
+  
+  // Pour le nom, on vérifie insensible à la casse
+  if (field === 'name') {
+    const { count, error } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .ilike('name', value); // ilike = case insensitive
+      
+    if (error) throw error;
+    return (count || 0) > 0;
+  }
+
+  // Pour email et phone
+  const { count, error } = await supabase
+    .from('profiles')
+    .select('*', { count: 'exact', head: true })
+    .eq(field, value);
+
+  if (error) throw error;
+  return (count || 0) > 0;
+};
 
 export const signUpUser = async (email: string, password: string, metadata: any) => {
   // 1. Création de l'utilisateur Auth
@@ -108,23 +212,36 @@ export const deleteUserAccount = async (password: string) => {
   
   if (!user || !user.email) throw new Error("Session invalide. Veuillez vous reconnecter.");
 
+  // Vérification mot de passe
   const { error: authError } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: password
   });
 
   if (authError) {
-      throw new Error("Mot de passe incorrect. Suppression annulée.");
+      throw new Error("Mot de passe incorrect. Suppression impossible.");
   }
 
   // 2. Appel de la fonction RPC sécurisée (définie en SQL) pour tout nettoyer
   const { error } = await supabase.rpc('delete_own_account');
+  
   if (error) {
-      console.error("Delete account error:", error);
-      throw new Error("Impossible de supprimer le compte (Erreur serveur).");
+      console.error("Delete account error details:", JSON.stringify(error, null, 2));
+      
+      // Gestion des erreurs spécifiques
+      if (error.message?.includes('function delete_own_account() does not exist')) {
+          throw new Error("Erreur Système : La fonction SQL de suppression manque. Contactez le support.");
+      }
+      if (error.message?.includes('column "occupant_phone" of relation "stalls" does not exist')) {
+          throw new Error("Erreur Schéma DB : La colonne 'occupant_phone' manque dans la table 'stalls'. Veuillez exécuter le script SQL de migration.");
+      }
+      
+      throw new Error(`Erreur technique : ${error.message || JSON.stringify(error)}`);
   }
   
-  await signOutUser();
+  // 3. Déconnexion forcée locale si succès (et si la session n'est pas déjà tuée par le serveur)
+  // On ignore l'erreur ici car l'utilisateur n'existe plus
+  await supabase.auth.signOut().catch(() => {});
 };
 
 export const getCurrentUserProfile = async (userId: string) => {

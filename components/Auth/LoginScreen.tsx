@@ -1,17 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
-import { LogIn, Mail, Lock, AlertCircle, ShoppingBag, Loader2, Store, X, Send, Eye, EyeOff, Check } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Loader2, Store, X, Send, Eye, EyeOff, Check } from 'lucide-react';
 import { resetPasswordForEmail } from '../../services/supabaseService';
 
 interface LoginScreenProps {
   onLogin: (email: string, pass: string) => void;
   onGoToRegister: () => void;
-  onGuestAccess: () => void;
+  onGuestAccess: () => void; // Kept in interface to avoid breaking App.tsx immediately, but unused in UI
   error?: string;
   isLoading?: boolean;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, onGuestAccess, error, isLoading = false }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, error, isLoading = false }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
@@ -75,7 +75,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, onGu
             <Store className="w-8 h-8 text-green-600" />
           </div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight mb-1">MarchéConnect</h1>
-          <p className="text-gray-500 text-sm">Gestion Municipale & Vente</p>
+          <p className="text-gray-500 text-sm">Portail Sécurisé</p>
         </div>
 
         {/* Form Container */}
@@ -164,23 +164,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, onGu
                  disabled={isLoading}
                  className="text-green-600 font-bold hover:underline text-sm"
                >
-                 Devenir Vendeur Certifié
+                 Créer un Compte
                </button>
              </div>
-             
-             <div className="relative py-2">
-                 <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-gray-100"></span></div>
-                 <div className="relative flex justify-center"><span className="bg-white px-3 text-[10px] text-gray-400 uppercase font-medium">Ou accès libre</span></div>
-             </div>
-
-             <button 
-               onClick={onGuestAccess} 
-               disabled={isLoading}
-               className="w-full py-3 border border-green-200 bg-green-50 text-green-700 font-bold rounded-xl hover:bg-green-100 transition-colors flex items-center justify-center gap-2 text-sm"
-             >
-               <ShoppingBag className="w-4 h-4" />
-               Vitrine Citoyenne
-             </button>
           </div>
         </div>
       </div>

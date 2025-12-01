@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { User, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle, CreditCard, Loader2, Camera, AlertTriangle } from 'lucide-react';
 import { IdentityType } from '../../types';
+import { checkValueExists } from '../../services/supabaseService';
 
 interface RegisterScreenProps {
   onRegister: (data: any) => void;
@@ -12,6 +13,8 @@ interface RegisterScreenProps {
 const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLogin, isLoading = false }) => {
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -22,8 +25,73 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
     identityFile: null as string | null
   });
 
-  const handleNext = () => setStep(prev => prev + 1);
-  const handlePrev = () => setStep(prev => prev - 1);
+  const handleNextStep = async () => {
+    setError(null);
+    
+    // --- STEP 1 VALIDATION (IDENTITY) ---
+    if (step === 1) {
+        if (!formData.name.trim()) {
+            setError("Le nom complet est obligatoire.");
+            return;
+        }
+        if (!formData.email.trim()) {
+            setError("L'adresse email est obligatoire.");
+            return;
+        }
+        if (!formData.email.includes('@')) {
+            setError("Format d'email invalide.");
+            return;
+        }
+
+        // Server-Side Pre-Check
+        setIsVerifying(true);
+        try {
+            const nameTaken = await checkValueExists('name', formData.name.trim());
+            if (nameTaken) {
+                setError("Ce nom d'affichage est déjà utilisé. Veuillez en choisir un autre.");
+                setIsVerifying(false);
+                return;
+            }
+
+            const emailTaken = await checkValueExists('email', formData.email.trim());
+            if (emailTaken) {
+                setError("Cette adresse email est déjà inscrite. Connectez-vous.");
+                setIsVerifying(false);
+                return;
+            }
+            
+            // All good
+            setStep(2);
+        } catch (e: any) {
+            setError("Impossible de vérifier la disponibilité. " + e.message);
+        } finally {
+            setIsVerifying(false);
+        }
+        return;
+    }
+
+    // --- STEP 2 VALIDATION (SECURITY) ---
+    if (step === 2) {
+        if (!formData.password) {
+            setError("Mot de passe obligatoire.");
+            return;
+        }
+        if (formData.password.length < 6) {
+            setError("Le mot de passe doit faire au moins 6 caractères.");
+            return;
+        }
+        if (formData.password !== formData.confirmPassword) {
+            setError("Les mots de passe ne correspondent pas.");
+            return;
+        }
+        setStep(3);
+    }
+  };
+
+  const handlePrev = () => {
+      setError(null);
+      setStep(prev => prev - 1);
+  };
 
   const handleFileUpload = () => {
     // Simulation upload fichier
@@ -37,8 +105,10 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
     setError(null);
     if (isLoading) return;
     
-    if (formData.password !== formData.confirmPassword) {
-        setError("Les mots de passe ne correspondent pas.");
+    // Final check logic is handled by handleNextStep for steps 1 & 2
+    // But step 3 is submitted here
+    if (!formData.identityFile) {
+        setError("La photo de la pièce d'identité est obligatoire.");
         return;
     }
 
@@ -183,7 +253,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
 
             {/* Error Message */}
             {error && (
-                <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl flex gap-2 items-start">
+                <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl flex gap-2 items-start animate-fade-in">
                     <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
                     <p className="text-xs text-red-700 font-medium">{error}</p>
                 </div>
@@ -205,8 +275,13 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                         </button>
                     )}
                     {step < 3 ? (
-                        <button type="button" onClick={handleNext} className="flex-1 py-4 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-black">
-                            Suivant <ArrowRight className="w-5 h-5"/>
+                        <button 
+                            type="button" 
+                            onClick={handleNextStep} 
+                            disabled={isVerifying}
+                            className="flex-1 py-4 bg-gray-900 disabled:bg-gray-400 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-black transition-colors"
+                        >
+                            {isVerifying ? <Loader2 className="w-5 h-5 animate-spin"/> : <>Suivant <ArrowRight className="w-5 h-5"/></>}
                         </button>
                     ) : (
                         <button 

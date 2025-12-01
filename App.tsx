@@ -153,6 +153,7 @@ const App: React.FC = () => {
         else if (profile.role === 'vendor') setCurrentView('map');
       } else {
         console.warn("Profil introuvable pour cet utilisateur auth.");
+        // Try fallback to metadata if profile fetch failed but auth succeeded
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
              setCurrentUser({
@@ -267,7 +268,7 @@ const App: React.FC = () => {
     return <LoginScreen 
       onLogin={handleLogin} 
       onGoToRegister={() => setAuthView('register')} 
-      onGuestAccess={() => setCurrentUser({ id: 'guest', role: 'guest', name: 'Visiteur', email: '', phone: '', passwordHash: '', isBanned: false, kycStatus: 'none', createdAt: 0 })}
+      onGuestAccess={() => { /* Guest access disabled */ }}
       error={loginError}
       isLoading={isAuthLoading}
     />;
