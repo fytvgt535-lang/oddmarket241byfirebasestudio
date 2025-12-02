@@ -810,6 +810,13 @@ ${product.isPromo ? `🔥 PROMO : ${product.promoPrice} FCFA` : ''}
                     )}
                 </div>
              )}
+             
+             {/* Permanent Access to Map even if stall exists */}
+             <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+                 <button onClick={() => setShowMap(true)} className="text-sm font-bold text-gray-500 flex items-center justify-center gap-1 hover:text-gray-800">
+                     <MapPin className="w-4 h-4"/> Voir le Plan du Marché
+                 </button>
+             </div>
         </div>
         
         {aiTip && (

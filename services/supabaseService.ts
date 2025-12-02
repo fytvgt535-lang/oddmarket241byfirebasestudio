@@ -1,3 +1,4 @@
+
 import { supabase } from '../supabaseClient';
 import { User, VendorProfile, Market, Stall, Product, Transaction, AppRole } from '../types';
 
@@ -66,6 +67,9 @@ export const uploadFile = async (file: File, bucket: 'avatars' | 'products'): Pr
 
     if (uploadError) {
       console.error("Supabase Storage Error:", uploadError);
+      if (uploadError.message.includes("row-level security")) {
+          throw new Error("Erreur Permission : Veuillez exécuter le script SQL pour autoriser l'upload (Storage Policies).");
+      }
       throw new Error(`Erreur upload: ${uploadError.message}`);
     }
 
@@ -108,14 +112,26 @@ export const checkValueExists = async (field: 'email' | 'name' | 'phone', value:
 };
 
 export const signUpUser = async (email: string, password: string, metadata: any) => {
-  // 1. Création de l'utilisateur Auth
+  // 1. Détermination du Rôle
+  let assignedRole = 'client'; // Par défaut client
+  
+  // Si l'utilisateur a explicitement choisi vendeur dans l'interface (passé via metadata)
+  if (metadata.accountType === 'vendor') {
+      assignedRole = 'vendor';
+  }
+
+  // Override par codes secrets (Prioritaire)
+  if (metadata.invitationCode === 'MAIRIE24') assignedRole = 'admin';
+  if (metadata.invitationCode === 'AGENT24') assignedRole = 'agent';
+
+  // 2. Création de l'utilisateur Auth
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         name: metadata.name,
-        role: metadata.role || 'vendor'
+        role: assignedRole
       }
     }
   });
@@ -127,7 +143,7 @@ export const signUpUser = async (email: string, password: string, metadata: any)
     throw authError;
   }
 
-  // 2. Création immédiate du profil dans la base de données (Public table)
+  // 3. Création immédiate du profil dans la base de données (Public table)
   if (authData.user) {
     const { error: profileError } = await supabase
       .from('profiles')
@@ -136,7 +152,7 @@ export const signUpUser = async (email: string, password: string, metadata: any)
           id: authData.user.id,
           email: email,
           name: metadata.name,
-          role: metadata.role || 'vendor',
+          role: assignedRole,
           phone: '',
           kyc_status: 'pending',
           kyc_document: metadata.kycDocument || null,
@@ -153,6 +169,12 @@ export const signUpUser = async (email: string, password: string, metadata: any)
          if (profileError.message?.includes('unique_name')) throw new Error("Ce nom d'affichage est déjà pris.");
          if (profileError.message?.includes('unique_kyc_number')) throw new Error("Ce numéro de document d'identité est déjà enregistré.");
       }
+      
+      if (profileError.message?.includes('infinite recursion')) {
+          await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+          throw new Error("ERREUR SQL CRITIQUE : 'Infinite Recursion'. Veuillez exécuter le script de correction SQL fourni (création de fonction is_admin).");
+      }
+
       throw new Error("Erreur technique lors de la création du profil : " + profileError.message);
     }
   }
@@ -165,10 +187,21 @@ export const signInUser = async (email: string, password: string) => {
     email,
     password,
   });
+  
   if (error) {
      if (error.message.includes("Invalid login credentials")) throw new Error("Identifiant ou mot de passe incorrect.");
      throw error;
   }
+
+  // Vérification immédiate du statut BANNI
+  if (data.user) {
+      const profile = await getCurrentUserProfile(data.user.id);
+      if (profile && profile.is_banned) {
+          await signOutUser();
+          throw new Error("Ce compte a été suspendu par l'administration.");
+      }
+  }
+
   return data;
 };
 
@@ -275,12 +308,50 @@ export const updateUserProfile = async (userId: string, updates: Partial<VendorP
       if (error.code === '23505') {
          if (error.message?.includes('unique_name')) throw new Error("Ce nom est déjà pris.");
       }
+      if (error.message?.includes('infinite recursion')) {
+          throw new Error("ERREUR SQL : Boucle infinie dans les permissions. Exécutez le script de correction SQL.");
+      }
       throw error;
   }
 
   if (updates.name) {
     await supabase.auth.updateUser({ data: { name: updates.name } });
   }
+};
+
+// --- ADMIN FEATURES ---
+export const fetchProfiles = async () => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+    
+    if (error) throw error;
+    
+    return data.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+        phone: p.phone,
+        role: p.role,
+        kycStatus: p.kyc_status,
+        kycDocument: p.kyc_document,
+        isBanned: p.is_banned,
+        createdAt: new Date(p.created_at).getTime(),
+        passwordHash: '***' // dummy
+    })) as User[];
+};
+
+export const adminUpdateUserStatus = async (userId: string, updates: Partial<User>) => {
+    const dbUpdates: any = {};
+    if (updates.isBanned !== undefined) dbUpdates.is_banned = updates.isBanned;
+    if (updates.kycStatus !== undefined) dbUpdates.kyc_status = updates.kycStatus;
+    
+    const { error } = await supabase
+        .from('profiles')
+        .update(dbUpdates)
+        .eq('id', userId);
+        
+    if (error) throw error;
 };
 
 export const fetchMarkets = async () => {
@@ -317,6 +388,31 @@ export const fetchStalls = async () => {
     activityLog: s.activity_log || [],
     messages: s.messages || [],
   })) as Stall[]; 
+};
+
+export const createStall = async (stall: Omit<Stall, 'id'>) => {
+    const { error } = await supabase
+        .from('stalls')
+        .insert([{
+            market_id: stall.marketId,
+            number: stall.number,
+            zone: stall.zone,
+            price: stall.price,
+            size: stall.size,
+            product_type: stall.productType,
+            status: 'free',
+            compliance_score: 100,
+            health_status: 'healthy'
+        }]);
+    if (error) throw error;
+};
+
+export const deleteStall = async (stallId: string) => {
+    const { error } = await supabase
+        .from('stalls')
+        .delete()
+        .eq('id', stallId);
+    if (error) throw error;
 };
 
 export const fetchProducts = async () => {
@@ -386,10 +482,6 @@ export const createProduct = async (product: Omit<Product, 'id'>) => {
 
 export const updateProduct = async (productId: string, updates: Partial<Product>) => {
   const { name, price, stockQuantity, category, description, imageUrl, isPromo, promoPrice, stallId, costPrice, isVisible, ...detailsUpdates } = updates;
-  
-  // First, we need to fetch the existing product to merge details correctly if we want to be safe, 
-  // or we can just update the JSONb keys if postgres supports it, but simple update replaces the column content usually.
-  // For simplicity in this app context, we'll fetch then update.
   
   const { data: existingData, error: fetchError } = await supabase
     .from('products')

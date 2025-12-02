@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, Star, ShoppingBag, ArrowLeft, Filter, Leaf, Shirt, Smartphone, Sparkles, X, Plus, Minus, ShoppingCart, CheckCircle, Smartphone as PhoneIcon, Clock, Download, Map as MapIcon, Navigation, MessageCircle, Info, ChevronDown } from 'lucide-react';
 import { Stall, Market, Product, ClientOrder } from '../types';
@@ -31,8 +32,8 @@ const PublicMarketplace: React.FC<PublicMarketplaceProps> = ({ stalls, markets, 
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
 
-  // Determine current market object
-  const currentMarket = markets.find(m => m.id === activeMarketId) || markets[0];
+  // SAFETY FIX: Default market if list is empty to prevent crash
+  const currentMarket = markets.find(m => m.id === activeMarketId) || markets[0] || { id: 'loading', name: 'Chargement...', location: '...', targetRevenue: 0 };
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -343,7 +344,7 @@ const PublicMarketplace: React.FC<PublicMarketplaceProps> = ({ stalls, markets, 
                                             <img 
                                                 src={prod.imageUrl || getCategoryImage(prod.category, idx)} 
                                                 alt={prod.name}
-                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                                             />
                                             {!prod.inStock && (
                                                 <div className="absolute inset-0 bg-white/60 flex items-center justify-center backdrop-blur-sm">

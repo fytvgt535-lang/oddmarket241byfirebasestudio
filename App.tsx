@@ -13,6 +13,7 @@ import PublicMarketplace from './components/PublicMarketplace';
 import NetworkStatus from './components/NetworkStatus';
 import LoginScreen from './components/Auth/LoginScreen';
 import RegisterScreen from './components/Auth/RegisterScreen';
+import ClientDashboard from './components/ClientDashboard';
 
 import { 
   Stall, HygieneReport, Transaction, VendorProfile, 
@@ -27,6 +28,14 @@ const INITIAL_MARKETS: Market[] = [
   { id: 'm3', name: 'Marché Louis', location: '1er Arrondissement', targetRevenue: 8000000 }
 ];
 
+// --- STALLS MOCK DATA (Pour éviter la carte blanche au démarrage) ---
+const INITIAL_STALLS: Stall[] = [
+    { id: 's1', marketId: 'm1', number: 'A-01', zone: 'Vivres Frais', price: 15000, status: 'free', productType: 'vivres', size: 'S', surfaceArea: 4, complianceScore: 100, healthStatus: 'healthy', documents: [], employees: [], activityLog: [], messages: [] },
+    { id: 's2', marketId: 'm1', number: 'A-02', zone: 'Vivres Frais', price: 20000, status: 'occupied', occupantName: 'Maman Rose', productType: 'vivres', size: 'M', surfaceArea: 6, complianceScore: 95, healthStatus: 'healthy', documents: [], employees: [], activityLog: [], messages: [] },
+    { id: 's3', marketId: 'm1', number: 'B-10', zone: 'Textile', price: 35000, status: 'free', productType: 'textile', size: 'L', surfaceArea: 9, complianceScore: 100, healthStatus: 'healthy', documents: [], employees: [], activityLog: [], messages: [] },
+    { id: 's4', marketId: 'm2', number: 'C-05', zone: 'Electronique', price: 25000, status: 'occupied', occupantName: 'Techno Services', productType: 'electronique', size: 'S', surfaceArea: 4, complianceScore: 80, healthStatus: 'warning', documents: [], employees: [], activityLog: [], messages: [] },
+];
+
 const App: React.FC = () => {
   // --- AUTH STATE ---
   const [session, setSession] = useState<any>(null);
@@ -36,14 +45,13 @@ const App: React.FC = () => {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // --- APP STATE (ROUTING) ---
-  // On utilise des vues explicites basées sur le rôle
-  const [currentView, setCurrentView] = useState<'vendor-dashboard' | 'admin-dashboard' | 'agent-tool' | 'marketplace'>('vendor-dashboard');
+  const [currentView, setCurrentView] = useState<'vendor-dashboard' | 'admin-dashboard' | 'agent-tool' | 'marketplace' | 'client-dashboard'>('client-dashboard');
   const [isDataLoading, setIsDataLoading] = useState(false);
 
   // Data from Supabase
   const [users, setUsers] = useState<User[]>([]);
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [stalls, setStalls] = useState<Stall[]>([]);
+  const [markets, setMarkets] = useState<Market[]>(INITIAL_MARKETS); // Initialize immediately
+  const [stalls, setStalls] = useState<Stall[]>(INITIAL_STALLS); // Initialize immediately
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
@@ -77,13 +85,74 @@ const App: React.FC = () => {
       if (event === 'SIGNED_OUT' || !session) {
           setCurrentUser(null);
           setAuthView('login');
+          setVendorDetails({});
       } else if (session?.user) {
           fetchUserProfile(session.user.id);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    // Realtime User Updates (Kick if banned, update role)
+    const profileChannel = supabase.channel('public:profiles')
+        .on(
+            'postgres_changes', 
+            { event: 'UPDATE', schema: 'public', table: 'profiles' }, 
+            (payload) => {
+                if (session?.user && payload.new.id === session.user.id) {
+                    console.log("Realtime Profile Update:", payload.new);
+                    
+                    // Security: Immediate Kick if Banned
+                    if (payload.new.is_banned) {
+                        SupabaseService.signOutUser().then(() => alert("Votre compte a été suspendu."));
+                        return;
+                    }
+
+                    // Update Role / Data
+                    setCurrentUser(prev => prev ? ({ 
+                        ...prev, 
+                        role: payload.new.role,
+                        kycStatus: payload.new.kyc_status,
+                        name: payload.new.name
+                    }) : null);
+                }
+            }
+        )
+        .subscribe();
+
+    return () => {
+        subscription.unsubscribe();
+        supabase.removeChannel(profileChannel);
+    };
+  }, [session]);
+
+  // --- 1.5 REACTIVE ROUTING (THE FIX) ---
+  // Dès que currentUser change (connexion ou mise à jour profil), on force la vue correcte
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Si l'utilisateur est un invité (explicite)
+    if (currentUser.role === 'guest') {
+      setCurrentView('marketplace');
+      return;
+    }
+
+    // Routage basé sur le rôle
+    switch (currentUser.role) {
+      case 'admin':
+        setCurrentView('admin-dashboard');
+        break;
+      case 'agent':
+        setCurrentView('agent-tool');
+        break;
+      case 'vendor':
+        setCurrentView('vendor-dashboard');
+        break;
+      case 'client':
+        setCurrentView('client-dashboard');
+        break;
+      default:
+        setCurrentView('client-dashboard'); // Fallback safe
+    }
+  }, [currentUser]); // Dépendance critique : currentUser
 
   // --- 2. DATA FETCHING ---
   useEffect(() => {
@@ -92,17 +161,20 @@ const App: React.FC = () => {
       
       setIsDataLoading(true);
       try {
-        const [fetchedMarkets, fetchedStalls, fetchedProducts, fetchedTrans] = await Promise.all([
+        const [fetchedMarkets, fetchedStalls, fetchedProducts, fetchedTrans, fetchedUsers] = await Promise.all([
           SupabaseService.fetchMarkets(),
           SupabaseService.fetchStalls(),
           SupabaseService.fetchProducts(),
-          SupabaseService.fetchTransactions()
+          SupabaseService.fetchTransactions(),
+          currentUser?.role === 'admin' ? SupabaseService.fetchProfiles() : Promise.resolve([])
         ]);
 
-        setMarkets(fetchedMarkets.length > 0 ? fetchedMarkets : INITIAL_MARKETS);
-        setStalls(fetchedStalls);
+        if (fetchedMarkets.length > 0) setMarkets(fetchedMarkets);
+        if (fetchedStalls.length > 0) setStalls(fetchedStalls);
         setProducts(fetchedProducts);
         setTransactions(fetchedTrans);
+        if (currentUser?.role === 'admin') setUsers(fetchedUsers);
+
       } catch (error) {
         console.error("Error loading data:", error);
       } finally {
@@ -110,7 +182,9 @@ const App: React.FC = () => {
       }
     };
 
-    loadData();
+    if (currentUser) {
+      loadData();
+    }
 
     if (session) {
       const marketSub = SupabaseService.subscribeToTable('markets', () => loadData());
@@ -123,7 +197,7 @@ const App: React.FC = () => {
         productSub.unsubscribe();
       };
     }
-  }, [session]);
+  }, [session, currentUser?.role]); // Recharger si le rôle change (ex: devient admin)
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -148,25 +222,6 @@ const App: React.FC = () => {
             photoUrl: profile.avatar_url
         });
         
-        // --- ROUTING INTELLIGENT ---
-        // Redirection automatique selon le rôle
-        switch(profile.role) {
-            case 'admin':
-                setCurrentView('admin-dashboard');
-                break;
-            case 'agent':
-                setCurrentView('agent-tool');
-                break;
-            case 'vendor':
-                setCurrentView('vendor-dashboard');
-                break;
-            case 'guest':
-                setCurrentView('marketplace');
-                break;
-            default:
-                setCurrentView('vendor-dashboard'); // Fallback safe
-        }
-
       } else {
         console.warn("Profil introuvable, tentative de fallback...");
         const { data: { user } } = await supabase.auth.getUser();
@@ -175,7 +230,7 @@ const App: React.FC = () => {
                  id: user.id,
                  email: user.email || '',
                  name: user.user_metadata?.name || 'Utilisateur',
-                 role: 'vendor', // Par défaut
+                 role: 'client', // Par défaut
                  phone: '',
                  isBanned: false,
                  kycStatus: 'pending',
@@ -183,7 +238,6 @@ const App: React.FC = () => {
                  passwordHash: '***'
              };
              setCurrentUser(fallbackUser);
-             setCurrentView('vendor-dashboard');
         }
       }
     } catch (error: any) {
@@ -210,7 +264,8 @@ const App: React.FC = () => {
     try {
       const result = await SupabaseService.signUpUser(data.email, data.password, {
         name: data.name,
-        role: 'vendor', // Par défaut, on crée des vendeurs. Les agents/admins sont créés manuellement en DB ou via interface admin.
+        invitationCode: data.invitationCode, 
+        accountType: data.accountType,
         kycDocument: {
            type: data.identityType,
            number: data.identityNumber,
@@ -263,6 +318,36 @@ const App: React.FC = () => {
       }));
   };
 
+  const handleUpdateUserStatus = async (userId: string, updates: Partial<User>) => {
+      try {
+          await SupabaseService.adminUpdateUserStatus(userId, updates);
+          // Update local list
+          setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...updates } : u));
+      } catch (error: any) {
+          alert("Erreur MAJ utilisateur: " + error.message);
+      }
+  };
+
+  // --- ADMIN STALL MANAGEMENT ---
+  const handleCreateStall = async (stallData: Omit<Stall, 'id'>) => {
+      try {
+          await SupabaseService.createStall(stallData);
+          alert("Étal créé avec succès !");
+      } catch (e: any) {
+          alert("Erreur création étal: " + e.message);
+      }
+  };
+
+  const handleDeleteStall = async (stallId: string) => {
+      try {
+          await SupabaseService.deleteStall(stallId);
+          alert("Étal supprimé.");
+          setStalls(prev => prev.filter(s => s.id !== stallId));
+      } catch (e: any) {
+          alert("Erreur suppression: " + e.message);
+      }
+  };
+
   const handleReserveStall = async (stallId: string, provider: PaymentProvider, isPriority: boolean) => {
       if (!currentUser) return;
       
@@ -301,6 +386,18 @@ const App: React.FC = () => {
       }
   };
 
+  const handleCreateClientOrder = (order: Omit<ClientOrder, 'id' | 'date' | 'status'>) => {
+      const newOrder: ClientOrder = {
+          ...order,
+          id: `ORD-${Date.now()}`,
+          date: Date.now(),
+          status: 'pending',
+          customerId: currentUser?.id // Link to logged in user if available
+      };
+      setOrders(prev => [...prev, newOrder]);
+      // In a real app, this would save to Supabase
+  };
+
   // --- VIEW RENDERING ---
 
   if (currentUser?.role === 'guest') {
@@ -329,7 +426,7 @@ const App: React.FC = () => {
     return <LoginScreen 
       onLogin={handleLogin} 
       onGoToRegister={() => setAuthView('register')} 
-      onGuestAccess={() => {}}
+      onGuestAccess={() => {}} // Guest access removed
       error={loginError}
       isLoading={isAuthLoading}
     />;
@@ -370,7 +467,7 @@ const App: React.FC = () => {
               <div className="leading-tight">
                 <h1 className="text-lg font-bold text-gray-900">MarchéConnect</h1>
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">
-                   {role === 'admin' ? 'Espace Mairie' : role === 'agent' ? 'Terminal Agent' : 'Espace Vendeur'}
+                   {role === 'admin' ? 'Espace Mairie' : role === 'agent' ? 'Terminal Agent' : role === 'client' ? 'Espace Client' : 'Espace Vendeur'}
                 </p>
               </div>
             </div>
@@ -388,7 +485,7 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
          
          {/* 1. VENDOR VIEW */}
-         {currentView === 'vendor-dashboard' && role === 'vendor' && (
+         {currentView === 'vendor-dashboard' && (
              <VendorDashboard 
                 profile={vendorProfile} 
                 transactions={transactions.filter(t => t.stallNumber === vendorProfile.stallId)} 
@@ -410,7 +507,7 @@ const App: React.FC = () => {
          )}
 
          {/* 2. ADMIN VIEW */}
-         {currentView === 'admin-dashboard' && role === 'admin' && (
+         {currentView === 'admin-dashboard' && (
              <AdminDashboard 
                 markets={markets}
                 stalls={stalls}
@@ -428,11 +525,14 @@ const App: React.FC = () => {
                 onAddMarket={() => {}}
                 onUpdateMarket={() => {}}
                 onDeleteMarket={() => {}}
+                onUpdateUserStatus={handleUpdateUserStatus}
+                onCreateStall={handleCreateStall}
+                onDeleteStall={handleDeleteStall}
              />
          )}
 
          {/* 3. AGENT VIEW */}
-         {currentView === 'agent-tool' && role === 'agent' && (
+         {currentView === 'agent-tool' && (
              <AgentFieldTool 
                 stalls={stalls}
                 sanctions={sanctions}
@@ -442,6 +542,16 @@ const App: React.FC = () => {
                 onCollectPayment={() => {}}
                 onIssueSanction={() => {}}
                 onShiftAction={() => {}}
+             />
+         )}
+
+         {/* 4. CLIENT VIEW */}
+         {currentView === 'client-dashboard' && (
+             <ClientDashboard 
+                stalls={stalls}
+                markets={markets}
+                products={products}
+                orders={orders.filter(o => o.customerId === currentUser?.id)}
              />
          )}
       </main>

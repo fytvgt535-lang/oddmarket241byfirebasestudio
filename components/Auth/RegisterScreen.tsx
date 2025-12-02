@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { User, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle, CreditCard, Loader2, Camera, AlertTriangle } from 'lucide-react';
+import { User, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle, CreditCard, Loader2, Camera, AlertTriangle, Key } from 'lucide-react';
 import { IdentityType } from '../../types';
 import { checkValueExists } from '../../services/supabaseService';
 
@@ -22,7 +22,8 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
     confirmPassword: '',
     identityType: 'cni' as IdentityType,
     identityNumber: '',
-    identityFile: null as string | null
+    identityFile: null as string | null,
+    invitationCode: '' // New Field
   });
 
   const handleNextStep = async () => {
@@ -155,6 +156,20 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                             />
                         </div>
                     </div>
+
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Code d'Invitation (Optionnel)</label>
+                        <div className="relative">
+                            <Key className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" />
+                            <input 
+                              type="text" 
+                              placeholder="Pour Admin/Agent" 
+                              value={formData.invitationCode} 
+                              onChange={e => setFormData({...formData, invitationCode: e.target.value})} 
+                              className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-green-500 focus:bg-white transition-all uppercase"
+                            />
+                        </div>
+                    </div>
                 </div>
             );
         case 2:
@@ -198,7 +213,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                 <div className="space-y-6 animate-fade-in">
                     <div className="text-center">
                         <h3 className="text-xl font-bold text-gray-800 mb-1">3. Validation (KYC)</h3>
-                        <p className="text-sm text-gray-500">Pour votre badge Vendeur Officiel</p>
+                        <p className="text-sm text-gray-500">Pour votre badge Officiel</p>
                     </div>
 
                     <div>

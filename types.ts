@@ -2,7 +2,7 @@
 export type StallStatus = 'free' | 'occupied' | 'reserved';
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
 export type Language = 'fr' | 'fang' | 'mpongwe';
-export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'guest';
+export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'guest' | 'client';
 
 // --- AUTHENTICATION & USER MANAGEMENT ---
 export type KycStatus = 'pending' | 'verified' | 'rejected' | 'none';
@@ -276,6 +276,7 @@ export interface Product {
 export interface ClientOrder {
   id: string;
   stallId: string;
+  customerId?: string; // Linked to User
   customerName: string;
   customerPhone: string;
   items: { productId: string; name: string; quantity: number; price: number }[];
