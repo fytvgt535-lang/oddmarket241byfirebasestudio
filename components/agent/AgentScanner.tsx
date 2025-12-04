@@ -48,9 +48,10 @@ const AgentScanner: React.FC<AgentScannerProps> = ({ stalls, mode, onScanComplet
 
   return (
     <div className="space-y-6 animate-fade-in">
-        <div 
+        <button 
             onClick={handleSimulateScan} 
-            className={`bg-white rounded-3xl aspect-square flex flex-col items-center justify-center border-4 border-dashed cursor-pointer transition-all active:scale-95 ${mode === 'collect' ? 'border-blue-200 hover:border-blue-500 hover:bg-blue-50' : 'border-red-200 hover:border-red-500 hover:bg-red-50'}`}
+            className={`w-full bg-white rounded-3xl aspect-square flex flex-col items-center justify-center border-4 border-dashed cursor-pointer transition-all active:scale-95 ${mode === 'collect' ? 'border-blue-200 hover:border-blue-500 hover:bg-blue-50' : 'border-red-200 hover:border-red-500 hover:bg-red-50'}`}
+            type="button"
         >
             {isProcessing ? (
                 <RefreshCw className={`w-24 h-24 animate-spin ${mode === 'collect' ? 'text-blue-400' : 'text-red-400'}`}/>
@@ -60,7 +61,7 @@ const AgentScanner: React.FC<AgentScannerProps> = ({ stalls, mode, onScanComplet
             <p className="font-black text-xl text-gray-400 mt-6 uppercase tracking-widest">
                 {isProcessing ? "Analyse..." : "Toucher pour Scanner"}
             </p>
-        </div>
+        </button>
 
         {mode === 'collect' && (
             <div className="flex gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">

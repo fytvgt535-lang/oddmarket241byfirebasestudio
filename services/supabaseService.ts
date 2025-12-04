@@ -110,7 +110,7 @@ export const getCurrentUserProfile = async (id: string) => {
             stallId: p.stall_id,
             marketId: p.market_id,
             bio: p.bio,
-            photoUrl: p.avatar_url, // CRITICAL FIX: Map avatar_url to photoUrl
+            photoUrl: p.avatar_url,
             isLogisticsSubscribed: p.is_logistics_subscribed,
             subscriptionExpiry: p.subscription_expiry ? new Date(p.subscription_expiry).getTime() : undefined,
             createdAt: new Date(p.created_at).getTime(),
@@ -169,10 +169,30 @@ export const fetchMarkets = async (): Promise<Market[]> => {
     try {
         const { data, error } = await supabase.from('markets').select('*');
         if (error) throw error;
-        return data.map((m: any) => ({
-            id: m.id, name: m.name, city: m.city || 'Libreville', neighborhood: m.neighborhood || '',
-            targetRevenue: m.target_revenue || 0, capacity: m.capacity || 0, baseRent: m.base_rent || 0,
-            hasDeliveryService: m.has_delivery || false, description: m.description || ''
+        
+        // Define exact shape to avoid 'any'
+        type MarketRow = {
+            id: string;
+            name: string;
+            city: string | null;
+            neighborhood: string | null;
+            target_revenue: number | null;
+            capacity: number | null;
+            base_rent: number | null;
+            has_delivery: boolean | null;
+            description: string | null;
+        };
+
+        return (data as MarketRow[]).map((m) => ({
+            id: m.id, 
+            name: m.name, 
+            city: m.city || 'Libreville', 
+            neighborhood: m.neighborhood || '',
+            targetRevenue: m.target_revenue || 0, 
+            capacity: m.capacity || 0, 
+            baseRent: m.base_rent || 0,
+            hasDeliveryService: m.has_delivery || false, 
+            description: m.description || ''
         }));
     } catch { return []; }
 };

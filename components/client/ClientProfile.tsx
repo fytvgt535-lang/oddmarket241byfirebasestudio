@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { User, QrCode, MapPin, ListChecks, Heart, Settings, LogOut, Plus, Trash2, CheckCircle, Home, Briefcase, Star, Edit3, Camera, Loader2, X, Search, Bell, Globe } from 'lucide-react';
+import { QrCode, MapPin, ListChecks, Heart, Settings, LogOut, Plus, Trash2, CheckCircle, Home, Briefcase, Star, Edit3, Camera, Loader2, X, Search, Bell } from 'lucide-react';
 import { User as UserType, ShoppingItem, UserAddress, Stall, Language } from '../../types';
 import { Button } from '../ui/Button';
-import { Input, Select } from '../ui/Input';
+import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import toast from 'react-hot-toast';
@@ -110,10 +110,6 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
       }
       // Optimistic update
       setUser({ ...user, favorites: newFavs });
-      // Real update (using a generic updateProfile which handles JSONB or specific cols)
-      // Note: backend support for 'favorites' column is assumed via updateUserProfile wrapper or JSONB
-      // For MVP we might need to ensure 'favorites' column exists or store in metadata. 
-      // Assuming 'favorites' is a column or part of a JSONB field.
       await updateUserProfile(user.id, { favorites: newFavs } as any); 
   };
 
@@ -165,15 +161,15 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
         
         <div className="flex justify-between items-start relative z-10">
           <div className="flex items-center gap-4">
-            <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+            <button className="relative group cursor-pointer bg-transparent border-none p-0" onClick={() => fileInputRef.current?.click()} aria-label="Changer photo de profil">
                 <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm border-2 border-white/50 flex items-center justify-center text-2xl font-bold text-white shadow-lg overflow-hidden">
-                    {user.photoUrl ? <img src={user.photoUrl} className="w-full h-full object-cover"/> : user.name?.charAt(0) || 'C'}
+                    {user.photoUrl ? <img src={user.photoUrl} className="w-full h-full object-cover" alt="Profil"/> : user.name?.charAt(0) || 'C'}
                 </div>
                 <div className="absolute inset-0 bg-black/30 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-white"/> : <Camera className="w-5 h-5 text-white"/>}
                 </div>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
-            </div>
+            </button>
             <div>
               <p className="text-orange-100 text-xs font-bold uppercase tracking-wider">Carte Membre</p>
               <h2 className="text-2xl font-black text-white leading-tight">{user.name || 'Client'}</h2>
@@ -184,7 +180,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
               </div>
             </div>
           </div>
-          <button className="bg-white text-orange-600 p-2 rounded-xl shadow-lg active:scale-95 transition-transform" onClick={() => toast("QR Code affiché !")}>
+          <button className="bg-white text-orange-600 p-2 rounded-xl shadow-lg active:scale-95 transition-transform" onClick={() => toast("QR Code affiché !")} aria-label="Afficher QR Code">
             <QrCode className="w-6 h-6"/>
           </button>
         </div>
@@ -228,8 +224,8 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
       {activeTab === 'general' && (
         <div className="space-y-4 animate-slide-up">
           <Card className="divide-y divide-gray-100">
-            {/* FAVORITES TRIGGER */}
-            <div onClick={() => setIsFavoritesOpen(true)} className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors">
+            {/* FAVORITES TRIGGER - FIXED A11Y */}
+            <button onClick={() => setIsFavoritesOpen(true)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-pink-100 text-pink-600 rounded-full"><Heart className="w-5 h-5"/></div>
                 <div>
@@ -238,10 +234,10 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
                 </div>
               </div>
               <Edit3 className="w-4 h-4 text-gray-400"/>
-            </div>
+            </button>
 
-            {/* PREFERENCES TRIGGER */}
-            <div onClick={() => setIsPrefsOpen(true)} className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors">
+            {/* PREFERENCES TRIGGER - FIXED A11Y */}
+            <button onClick={() => setIsPrefsOpen(true)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 text-blue-600 rounded-full"><Settings className="w-5 h-5"/></div>
                 <div>
@@ -250,7 +246,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
                 </div>
               </div>
               <Edit3 className="w-4 h-4 text-gray-400"/>
-            </div>
+            </button>
           </Card>
 
           <Button variant="outline" className="w-full text-red-600 border-red-100 hover:bg-red-50" onClick={signOutUser}>
@@ -259,6 +255,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
         </div>
       )}
 
+      {/* ... (Rest of tabs remain identical but correct divs are used) ... */}
       {activeTab === 'shopping' && (
         <div className="space-y-4 animate-slide-up">
           <Card className="p-4 bg-yellow-50 border-yellow-100">
@@ -311,7 +308,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
           )}
 
           {addresses.map(addr => (
-            <Card key={addr.id} className="p-4 flex items-start gap-4 hover:border-blue-300 transition-colors cursor-pointer group">
+            <div key={addr.id} className="p-4 bg-white border border-gray-100 rounded-2xl flex items-start gap-4 hover:border-blue-300 transition-colors shadow-sm">
               <div className={`p-3 rounded-full ${addr.label.toLowerCase().includes('maison') ? 'bg-green-100 text-green-600' : addr.label.toLowerCase().includes('bureau') ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
                 {addr.label.toLowerCase().includes('maison') ? <Home className="w-5 h-5"/> : addr.label.toLowerCase().includes('bureau') ? <Briefcase className="w-5 h-5"/> : <MapPin className="w-5 h-5"/>}
               </div>
@@ -322,7 +319,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
                 </div>
                 <p className="text-sm text-gray-500 mt-1">{addr.details}</p>
               </div>
-            </Card>
+            </div>
           ))}
         </div>
       )}

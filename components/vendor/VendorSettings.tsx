@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { User, Lock, AlertTriangle, Save, Loader2, Camera, X } from 'lucide-react';
+import { User, Lock, AlertTriangle, Save, Loader2, Camera } from 'lucide-react';
 import { VendorProfile } from '../../types';
 import { updateUserPassword, updateUserProfile, deleteUserAccount, uploadFile } from '../../services/supabaseService';
 import ImageCropper from '../ImageCropper';
@@ -102,14 +102,18 @@ const VendorSettings: React.FC<VendorSettingsProps> = ({ profile, onUpdateProfil
         {/* Photo Upload */}
         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
         <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center">
-            <div onClick={() => fileInputRef.current?.click()} className="relative cursor-pointer group">
+            <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="relative cursor-pointer group bg-transparent border-none p-0"
+                aria-label="Changer photo de profil"
+            >
                 <div className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden border-4 border-white shadow-lg">
-                    {profile.photoUrl ? <img src={profile.photoUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600 text-2xl font-bold">{profile.name.charAt(0)}</div>}
+                    {profile.photoUrl ? <img src={profile.photoUrl} className="w-full h-full object-cover" alt="Avatar"/> : <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600 text-2xl font-bold">{profile.name.charAt(0)}</div>}
                 </div>
                 <div className="absolute bottom-0 right-0 bg-white p-2 rounded-full shadow-md border border-gray-200 group-hover:scale-110 transition-transform">
                     {isUploading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Camera className="w-4 h-4 text-gray-600"/>}
                 </div>
-            </div>
+            </button>
             <p className="mt-3 text-xs text-gray-400 font-bold">Toucher pour changer</p>
         </div>
 

@@ -151,7 +151,7 @@ const PublicMarketplace: React.FC<PublicMarketplaceProps> = ({
         {filteredStalls.map((stall, idx) => (
             <Card key={stall.id} onClick={() => setSelectedStall(stall)} className="hover:shadow-xl hover:-translate-y-1 transition-all overflow-hidden cursor-pointer group border-gray-100">
                 <div className="h-40 bg-gray-200 relative">
-                    <img src={getCategoryImage(stall.productType, idx)} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"/>
+                    <img src={getCategoryImage(stall.productType, idx)} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={`${stall.productType} stall`}/>
                     <div className="absolute inset-0 bg-black/40"></div>
                     <div className="absolute bottom-3 left-3"><Badge className="bg-white/20 text-white backdrop-blur-md border-transparent">{stall.productType}</Badge></div>
                     {/* Market Badge for Global View */}
@@ -177,7 +177,7 @@ const PublicMarketplace: React.FC<PublicMarketplaceProps> = ({
             <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-4">
                 {products.filter(p => p.stallId === selectedStall.id).map(p => (
                     <Card key={p.id} className="p-3">
-                        <div className="h-24 bg-gray-100 rounded-lg mb-2 overflow-hidden"><img src={p.imageUrl || getCategoryImage(p.category, 0)} className="w-full h-full object-cover"/></div>
+                        <div className="h-24 bg-gray-100 rounded-lg mb-2 overflow-hidden"><img src={p.imageUrl || getCategoryImage(p.category, 0)} className="w-full h-full object-cover" alt={p.name}/></div>
                         <p className="font-bold text-sm truncate text-gray-900">{p.name}</p>
                         <div className="flex justify-between items-center mt-1"><span className="text-green-700 font-black">{formatCurrency(p.price)}</span><Button size="sm" onClick={(e) => { e.stopPropagation(); addToCart(p); }}><Plus className="w-3 h-3"/></Button></div>
                     </Card>

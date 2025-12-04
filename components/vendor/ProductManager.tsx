@@ -198,7 +198,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
                     <Card key={p.id} className={`p-3 flex gap-4 items-stretch relative overflow-hidden ${!p.isVisible ? 'opacity-70 bg-gray-50' : ''}`}>
                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${p.stockQuantity === 0 ? 'bg-red-500' : p.stockQuantity < 5 ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         <div className="w-24 h-24 bg-gray-50 rounded-xl shrink-0 overflow-hidden relative">
-                            {p.imageUrl ? <img src={p.imageUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon className="w-8 h-8"/></div>}
+                            {p.imageUrl ? <img src={p.imageUrl} className="w-full h-full object-cover" alt={p.name}/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon className="w-8 h-8"/></div>}
                             {!p.isVisible && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><EyeOff className="w-6 h-6 text-white"/></div>}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
@@ -284,10 +284,10 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
                                             <button type="button" onClick={() => setForm({...form, quantity: (Number(form.quantity) + 1).toString()})} className="w-12 h-12 rounded-full bg-green-100 text-green-600 text-2xl font-bold">+</button>
                                         </div>
                                     </div>
-                                    <div onClick={() => fileInputRef.current?.click()} className="bg-gray-50 p-4 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 gap-2 cursor-pointer hover:bg-gray-100 h-32 relative overflow-hidden">
+                                    <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full bg-gray-50 p-4 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 gap-2 cursor-pointer hover:bg-gray-100 h-32 relative overflow-hidden transition-colors">
                                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
-                                        {form.imageUrl ? <img src={form.imageUrl} className="w-full h-full object-cover rounded-xl"/> : isUploading ? <Loader2 className="w-6 h-6 animate-spin text-green-600"/> : <><ImageIcon className="w-6 h-6"/><span className="text-xs font-bold">Ajouter Photo</span></>}
-                                    </div>
+                                        {form.imageUrl ? <img src={form.imageUrl} className="w-full h-full object-cover rounded-xl" alt="Preview"/> : isUploading ? <Loader2 className="w-6 h-6 animate-spin text-green-600"/> : <><ImageIcon className="w-6 h-6"/><span className="text-xs font-bold">Ajouter Photo</span></>}
+                                    </button>
                                 </>
                             )}
 
