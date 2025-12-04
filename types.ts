@@ -2,7 +2,54 @@
 export type StallStatus = 'free' | 'occupied' | 'reserved';
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
 export type Language = 'fr' | 'fang' | 'mpongwe';
-export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'guest' | 'client';
+export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
+
+// --- SMART SHOPPER (OFFLINE FEATURES) ---
+export interface LocalVendor {
+  id: string;
+  name: string;
+  type: 'bio' | 'grossiste' | 'economique' | 'standard';
+  rating: number; // 1-5
+  distance: string; // ex: "Zone A"
+}
+
+export interface ProductOffer {
+  id: string;
+  productId: string;
+  productName: string;
+  vendor: LocalVendor;
+  price: number;
+  unit: string;
+  attributes: {
+    isBio: boolean;
+    isFresh: boolean;
+    isLocal: boolean;
+    isPromo: boolean;
+  };
+  score?: number;
+}
+
+export interface SmartListItem {
+  id: string;
+  originalText: string;
+  cleanTerm: string;
+  preferences: {
+    bio: boolean;
+    cheap: boolean;
+    fresh: boolean;
+  };
+  offers: ProductOffer[];
+  selectedOfferId: string | null;
+}
+
+export interface SmartListHistory {
+  id: string;
+  name: string;
+  date: number;
+  originalText: string;
+  totalAtTheTime: number;
+  itemCount: number;
+}
 
 // --- AUTHENTICATION & USER MANAGEMENT ---
 export type KycStatus = 'pending' | 'verified' | 'rejected' | 'none';
@@ -11,14 +58,37 @@ export type IdentityType = 'cni' | 'passport' | 'carte_sejour' | 'permis';
 export interface IdentityDocument {
   type: IdentityType;
   number: string;
-  fileUrl: string; // Simulated URL
+  fileUrl: string;
   uploadedAt: number;
+}
+
+// --- NEW CLIENT FEATURES ---
+export interface UserAddress {
+  id: string;
+  label: string;
+  details: string;
+  isDefault: boolean;
+}
+
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  isChecked: boolean;
+}
+
+export interface UserPreferences {
+  language: Language;
+  notifications: {
+    push: boolean;
+    sms: boolean;
+    email: boolean;
+  };
 }
 
 export interface User {
   id: string;
   email: string;
-  passwordHash: string; // Simulated
+  passwordHash: string;
   role: AppRole;
   name: string;
   phone: string;
@@ -27,18 +97,26 @@ export interface User {
   kycDocument?: IdentityDocument;
   createdAt: number;
   lastLogin?: number;
-  marketId?: string; // For agents/vendors linked to specific market
-  stallId?: string; // For vendors
+  marketId?: string;
+  stallId?: string;
+  bio?: string;
+  photoUrl?: string;
+  isLogisticsSubscribed?: boolean;
+  subscriptionExpiry?: number;
+  
+  addresses?: UserAddress[];
+  shoppingList?: ShoppingItem[];
+  loyaltyPoints?: number;
+  favorites?: string[];
+  preferences?: UserPreferences;
 }
 
-// --- NEW: STALL HEALTH STATUS ---
 export type StallHealth = 'healthy' | 'warning' | 'critical';
 
-// --- NEW: NOTIFICATION SYSTEM ---
 export interface AppNotification {
   id: string;
-  recipientRole: 'admin' | 'vendor' | 'agent';
-  recipientId?: string; // If specific vendor
+  recipientRole: 'admin' | 'vendor' | 'agent' | 'client';
+  recipientId?: string;
   title: string;
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
@@ -49,9 +127,14 @@ export interface AppNotification {
 export interface Market {
   id: string;
   name: string;
-  location: string; // Quartier/Arrondissement
+  city: string;
+  neighborhood: string;
   image?: string;
-  targetRevenue: number; // Objectif mensuel en FCFA
+  targetRevenue: number;
+  capacity: number;
+  baseRent: number;
+  hasDeliveryService: boolean;
+  description?: string;
 }
 
 export interface Expense {
@@ -72,7 +155,7 @@ export interface SmsTemplate {
 
 export interface SmsCampaign {
   id: string;
-  marketId: string; // 'all' or specific market
+  marketId: string;
   targetAudience: 'all' | 'unpaid_30' | 'unpaid_60' | 'zone_vivres' | 'vulnerable';
   message: string;
   tone: SmsTemplate['tone'];
@@ -86,11 +169,11 @@ export interface PaymentPlan {
   vendorId: string;
   stallNumber: string;
   totalDebt: number;
-  installments: number; // Nombre de mois
+  installments: number;
   amountPerMonth: number;
   startDate: number;
   status: 'active' | 'completed' | 'defaulted';
-  progress: number; // 0-100
+  progress: number;
   installmentsList?: { month: number; status: 'paid' | 'pending'; dueDate: number }[];
 }
 
@@ -99,46 +182,43 @@ export interface Sanction {
   vendorId: string;
   marketId: string;
   type: 'warning' | 'fine' | 'suspension';
-  infractionId?: string; // Code officiel
+  infractionId?: string;
   reason: string;
-  amount: number; // Prix fixe obligatoire
+  amount: number;
   date: number;
-  status: 'active' | 'resolved';
-  issuedBy: string; // Agent ID
-  evidenceUrl?: string; // New: Proof photo
-  // Justice / Appeal Module
+  status: 'active' | 'resolved' | 'pending_appeal' | 'appeal_accepted' | 'appeal_rejected';
+  issuedBy: string;
+  evidenceUrl?: string;
   appealReason?: string;
   appealDate?: number;
   appealStatus?: 'pending' | 'accepted' | 'rejected';
 }
 
-// --- AGENT SECURE LOGS (BLACK BOX) ---
 export interface AgentLog {
   id: string;
   agentId: string;
   actionType: 'payment_collected' | 'sanction_issued' | 'shift_start' | 'shift_end' | 'cash_deposit';
-  details: string; // Ex: "Encaissement Loyer Stall MB-12"
+  details: string;
   amount?: number;
   timestamp: number;
-  hash: string; // Simulated cryptographic hash for integrity
-  location: string; // Simulated GPS Coords
-  evidenceUrl?: string; // Link to photo proof if applicable
+  hash: string;
+  location: string;
+  evidenceUrl?: string;
 }
 
 export interface Agent {
   id: string;
-  userId?: string; // Link to User
+  userId?: string;
   name: string;
   marketId: string;
-  role: 'collector' | 'hygiene' | 'delivery'; // Added delivery role
-  performanceScore: number; // 0-100 based on targets
+  role: 'collector' | 'hygiene' | 'delivery';
+  performanceScore: number;
   lastActive: number;
-  cashInHand: number; // Real-time cash tracking to be deposited
-  isShiftActive: boolean; // New: Shift status
+  cashInHand: number;
+  isShiftActive: boolean;
   logs: AgentLog[];
 }
 
-// --- DIGITAL RECEIPT (INVIOLABLE) ---
 export interface Receipt {
   id: string;
   transactionId: string;
@@ -147,19 +227,17 @@ export interface Receipt {
   amount: number;
   date: number;
   agentId: string;
-  hash: string; // Cryptographic proof
-  gpsCoordinates: string; // Where the receipt was issued
+  hash: string;
+  gpsCoordinates: string;
   marketId: string;
 }
-
-// --- DEEP DATA STRUCTURES FOR STALL TWIN ---
 
 export interface StallDocument {
   id: string;
   type: 'lease_agreement' | 'insurance' | 'hygiene_cert' | 'tax_clearance';
   status: 'valid' | 'expired' | 'missing' | 'pending';
   expiryDate: number;
-  url?: string; // Link to PDF/Image
+  url?: string;
 }
 
 export interface StallEmployee {
@@ -167,12 +245,12 @@ export interface StallEmployee {
   name: string;
   role: 'manager' | 'seller' | 'helper';
   phone: string;
-  isRegistered: boolean; // Has badge?
+  isRegistered: boolean;
 }
 
 export interface StallMessage {
   id: string;
-  direction: 'inbound' | 'outbound'; // From Vendor or From Admin
+  direction: 'inbound' | 'outbound';
   content: string;
   date: number;
   read: boolean;
@@ -188,109 +266,96 @@ export interface StallActivity {
 
 export interface Stall {
   id: string;
-  marketId: string; // Link to Market
+  marketId: string;
   number: string;
   zone: string;
-  price: number; // Monthly rent in FCFA
+  price: number;
   status: StallStatus;
-  
-  // Basic Identity
-  occupantName?: string; // Titulaire Legal
+  occupantName?: string;
   occupantPhone?: string;
-  occupantId?: string; // Link to User ID
-  
-  // Metrics
-  lastPaymentDate?: number; // For fraud detection
+  occupantId?: string;
+  lastPaymentDate?: number;
   size: 'S' | 'M' | 'L';
-  surfaceArea: number; // m2
+  surfaceArea: number;
   productType: ProductType;
-  isPriority?: boolean; // Reserved for vulnerable groups
-  
-  // Digital Twin Deep Data
-  complianceScore: number; // 0-100 AI Score
-  healthStatus: StallHealth; // Computed status for visual cards
+  isPriority?: boolean;
+  complianceScore: number;
+  healthStatus: StallHealth;
   documents: StallDocument[];
   employees: StallEmployee[];
   activityLog: StallActivity[];
-  messages: StallMessage[]; // Direct communication history
-  
-  // Geodata (Simulated)
+  messages: StallMessage[];
   coordinates?: { lat: number, lng: number };
 }
 
 export interface HygieneReport {
   id: string;
-  marketId: string; // Link to Market
+  marketId: string;
   category: 'waste' | 'water' | 'pest' | 'infrastructure';
   description: string;
   timestamp: number;
   status: 'pending' | 'resolved';
-  location: string; // Specific detail inside market
+  location: string;
   isAnonymous: boolean;
-  hasAudio?: boolean; // New: Voice recording support
+  hasAudio?: boolean;
 }
 
 export type PaymentProvider = 'orange' | 'momo' | 'airtel' | 'cash';
 
 export interface Transaction {
   id: string;
-  marketId: string; // Link to Market
+  marketId: string;
   amount: number;
   date: number;
-  type: 'rent' | 'fine' | 'tax';
+  type: 'rent' | 'fine' | 'tax' | 'logistics_sub';
   provider: PaymentProvider;
   stallNumber?: string;
   reference: string;
   status: 'pending' | 'completed';
-  collectedBy?: string; // Agent ID if cash
+  collectedBy?: string;
 }
 
-// --- E-COMMERCE / PRODUCT ---
 export interface Product {
   id: string;
   stallId: string;
   name: string;
   price: number;
-  promoPrice?: number; // New: Promotion
-  isPromo?: boolean; // New: Flag
-  costPrice?: number; // New: Prix d'achat pour calcul de marge
-  isVisible?: boolean; // New: Gestion visibilité
-  unit: string; // kg, paquet, pièce
+  promoPrice?: number;
+  isPromo?: boolean;
+  costPrice?: number;
+  isVisible?: boolean;
+  unit: string;
   imageUrl?: string;
-  additionalImages?: string[]; // New: Multiple images
+  additionalImages?: string[];
   inStock: boolean;
-  stockQuantity: number; // New: Precise stock management
+  stockQuantity: number;
   category: ProductType;
   description?: string;
-  origin?: string; // e.g. "Gabon (Local)", "Cameroun", "Import"
-  subCategory?: string; // e.g. "Tubercule", "Feuille", "Poisson fumé"
-  tags?: string[]; // New: "Bio", "Pimenté", etc.
-  
-  // New V2 fields
+  origin?: string;
+  subCategory?: string;
+  tags?: string[];
   wholesalePrices?: { minQuantity: number, price: number }[];
-  freshnessLevel?: number; // 0 (Old) - 100 (Fresh)
+  freshnessLevel?: number;
   qualityGrade?: 'A' | 'B' | 'C';
-  audioDescriptionUrl?: string; // Voice Note
+  audioDescriptionUrl?: string;
 }
 
 export interface ClientOrder {
   id: string;
   stallId: string;
-  customerId?: string; // Linked to User
+  customerId?: string;
   customerName: string;
   customerPhone: string;
   items: { productId: string; name: string; quantity: number; price: number }[];
   totalAmount: number;
-  status: 'pending' | 'paid' | 'preparing' | 'ready' | 'picked_up'; // Enhanced status
+  status: 'pending' | 'paid' | 'preparing' | 'ready' | 'picked_up' | 'in_transit' | 'delivered';
   date: number;
   paymentProvider: 'orange' | 'airtel' | 'momo';
   paymentRef: string;
-  
-  // Logistics
   deliveryMode: 'pickup' | 'delivery';
   deliveryAddress?: string;
   deliveryFee?: number;
-  assignedAgentId?: string; // Agent de mairie (livreur)
+  assignedAgentId?: string;
 }
 
 export interface SubscriptionHistory {
@@ -303,25 +368,22 @@ export interface SubscriptionHistory {
 
 export interface VendorProfile {
   id: string;
-  userId?: string; // Link to User
+  userId?: string;
   name: string;
   phone: string;
   stallId?: string;
   photoUrl?: string;
-  bannerUrl?: string; // New: Storefront banner
-  bio?: string; // New: Shop description
-  hygieneScore: number; // 1 to 5 stars
-  isVulnerable?: boolean; // Elderly or pregnant
+  bannerUrl?: string;
+  bio?: string;
+  hygieneScore: number;
+  isVulnerable?: boolean;
   language: Language;
-  
-  // Logistics
-  isLogisticsSubscribed: boolean; // 5000 FCFA/mois subscription
+  isLogisticsSubscribed: boolean;
   subscriptionExpiry?: number;
   subscriptionPlan?: 'standard' | 'premium';
   subscriptionHistory?: SubscriptionHistory[];
 }
 
-// --- PREDEFINED INFRACTIONS (CODE PENAL MARCHE) ---
 export const PREDEFINED_INFRACTIONS = [
   { id: 'HYG_01', label: 'Défaut d\'hygiène (Déchets)', amount: 5000 },
   { id: 'HYG_02', label: 'Eaux usées sur voie publique', amount: 10000 },
@@ -329,7 +391,7 @@ export const PREDEFINED_INFRACTIONS = [
   { id: 'OCC_02', label: 'Obstruction allée sécurité', amount: 25000 },
   { id: 'ADM_01', label: 'Absence de badge vendeur', amount: 2000 },
   { id: 'ADM_02', label: 'Défaut carnet de santé', amount: 5000 },
-  { id: 'DIV_99', label: 'Autre (Saisie Manuelle)', amount: 0 } // Requires manual input
+  { id: 'DIV_99', label: 'Autre (Saisie Manuelle)', amount: 0 }
 ];
 
 export interface VendorDashboardProps {
@@ -337,7 +399,7 @@ export interface VendorDashboardProps {
   transactions: Transaction[];
   receipts: Receipt[];
   myStall?: Stall;
-  stalls?: Stall[]; // Added for reservation
+  stalls?: Stall[];
   myReports: HygieneReport[];
   sanctions: Sanction[];
   paymentPlan?: PaymentPlan;
@@ -350,6 +412,6 @@ export interface VendorDashboardProps {
   onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
   onContestSanction?: (sanctionId: string, reason: string) => void;
   onUpdateProfile?: (updates: Partial<VendorProfile>) => void;
-  onToggleLogistics?: (subscribed: boolean) => void;
-  onReserve?: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void; // Added for reservation
+  onToggleLogistics?: (subscribed: boolean) => Promise<any>;
+  onReserve?: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void;
 }

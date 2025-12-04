@@ -1,3 +1,4 @@
+
 export const createImage = (url: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const image = new Image();
@@ -80,13 +81,10 @@ export default async function getCroppedImg(
   // paste generated rotate image at the top left corner
   ctx.putImageData(data, 0, 0);
 
-  // As Base64 string
-  // return canvas.toDataURL('image/jpeg');
-
-  // As Blob
+  // As Blob - CONVERTED TO WEBP
   return new Promise((resolve, reject) => {
     canvas.toBlob((file) => {
       resolve(file);
-    }, 'image/jpeg', 0.9); // High quality for the crop result, compression happens later
+    }, 'image/webp', 0.85); // WebP format with good quality
   });
 }

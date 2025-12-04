@@ -81,7 +81,7 @@ const USSDSimulator: React.FC<USSDSimulatorProps> = ({ onClose }) => {
             <div className="flex-1 flex flex-col items-center justify-center text-center">
               <p className="text-white font-bold mb-2">Succès !</p>
               <p>Votre demande a été traitée. Vous recevrez un SMS de confirmation.</p>
-              <button onClick={() => setScreen('MENU')} className="mt-4 text-xs border border-green-500 px-2 py-1">OK</button>
+              <button type="button" onClick={() => setScreen('MENU')} className="mt-4 text-xs border border-green-500 px-2 py-1">OK</button>
             </div>
           )}
         </div>
@@ -101,10 +101,11 @@ const USSDSimulator: React.FC<USSDSimulatorProps> = ({ onClose }) => {
 
         {/* Actions */}
         <div className="bg-gray-900 p-4 flex justify-between items-center px-8 pb-8">
-           <button onClick={() => { setInput(''); if(screen !== 'DIAL') setScreen('DIAL'); else onClose(); }} className="p-3 bg-red-600 rounded-full text-white">
+           <button type="button" onClick={() => { setInput(''); if(screen !== 'DIAL') setScreen('DIAL'); else onClose(); }} className="p-3 bg-red-600 rounded-full text-white">
              <ArrowLeft className="w-5 h-5" />
            </button>
            <button 
+            type="button"
             onClick={screen === 'DIAL' ? handleDial : handleMenuInput}
             className="p-3 bg-green-600 rounded-full text-white shadow-lg shadow-green-900/50"
           >

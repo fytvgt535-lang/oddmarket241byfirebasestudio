@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import { Stall, HygieneReport, Market, Transaction, VendorProfile, Sanction } from "../types";
 
@@ -19,15 +20,14 @@ export const analyzeLocationWithMaps = async (lat: number, lng: number, contextL
       
       Utilise Google Maps pour :
       1. Identifier ce qui se trouve réellement à cet endroit ou à proximité immédiate.
-      2. Me dire si cela correspond à une zone commerciale ou un marché.
-      3. Donner l'adresse ou le lieu-dit précis.
+      2. Donner l'adresse ou le lieu-dit précis.
       
       Réponds de manière factuelle pour un rapport d'audit.
     `;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
       config: {
         tools: [{ googleMaps: {} }],
       }
@@ -96,7 +96,7 @@ export const generateMarketAnalysis = async (
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
     });
 
     return response.text || "Analyse indisponible.";
@@ -122,7 +122,7 @@ export const generateVendorCoachTip = async (
     `;
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
     });
     return response.text || "Gardez votre étal propre pour attirer plus de clients !";
   } catch (e) { return "Gardez le sourire, les clients aiment ça !"; }
@@ -149,7 +149,7 @@ export const generateAgentScript = async (
     `;
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
     });
     return response.text || "Bonjour, nous avons plusieurs impayés enregistrés. Regardons cela ensemble pour éviter des pénalités.";
   } catch (e) { return "Bonjour, veuillez régulariser votre situation svp."; }

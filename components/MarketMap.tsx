@@ -1,8 +1,9 @@
 
+
 import React, { useState } from 'react';
 import { Stall, PaymentProvider, ProductType, Language } from '../types';
 import { t } from '../services/translations';
-import { ShoppingBag, Smartphone, Baby, AlertCircle, Lock, QrCode, Scan, ShieldCheck, RefreshCw } from 'lucide-react';
+import { ShoppingBag, Smartphone, Baby, AlertCircle, Lock, QrCode, Scan, ShieldCheck, RefreshCw, MapPin } from 'lucide-react';
 
 interface MarketMapProps {
   stalls: Stall[];
@@ -80,7 +81,13 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
       </div>
 
       {/* Grid Layout representing Market Zones */}
-      {zones.map(zone => (
+      {zones.length === 0 ? (
+        <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+          <MapPin className="w-12 h-12 text-gray-300 mx-auto mb-3"/>
+          <p className="text-gray-500 font-medium">Aucun étal disponible dans ce marché.</p>
+          <p className="text-sm text-gray-400">Contactez l'administration pour plus d'informations.</p>
+        </div>
+      ) : zones.map(zone => (
         <div key={zone} className="mb-8">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1">{zone}</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">

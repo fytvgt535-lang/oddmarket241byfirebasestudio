@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Camera, MapPin, Send, Trash2, Droplets, Bug, Construction, EyeOff, Eye, Mic } from 'lucide-react';
 import { HygieneReport, Language } from '../types';
