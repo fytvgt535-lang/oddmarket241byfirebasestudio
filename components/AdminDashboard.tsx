@@ -37,7 +37,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-    markets, stalls, reports, transactions = [], expenses, notifications, users = [], orders = [], sanctions = [],
+    markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], receipts = [], agents = [], paymentPlans = [],
     onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls 
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'comms' | 'social' | 'geo' | 'markets' | 'users' | 'audit'>('overview');

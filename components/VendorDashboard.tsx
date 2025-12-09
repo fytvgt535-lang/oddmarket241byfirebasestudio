@@ -7,7 +7,7 @@ import VendorSettings from './vendor/VendorSettings';
 import MarketMap from './MarketMap';
 import { calculateStallDebt, formatCurrency } from '../utils/coreUtils';
 
-const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve }) => {
+const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve, onContestSanction }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'store' | 'logistics' | 'settings'>('overview');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -48,7 +48,7 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
         ))}
       </div>
 
-      {activeTab === 'overview' && <VendorOverview profile={profile} myStall={myStall} totalDebt={totalDebt} transactions={transactions} sanctions={sanctions} onShowMap={() => setShowMap(true)} onSpeak={() => {}} />}
+      {activeTab === 'overview' && <VendorOverview profile={profile} myStall={myStall} totalDebt={totalDebt} transactions={transactions} sanctions={sanctions} onShowMap={() => setShowMap(true)} onSpeak={() => {}} onContestSanction={onContestSanction} />}
       {activeTab === 'store' && <ProductManager products={products} myStall={myStall} profile={profile} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onDeleteProduct={onDeleteProduct} />}
       {activeTab === 'logistics' && (
            <div className={`rounded-3xl p-6 relative overflow-hidden text-white shadow-lg animate-fade-in ${profile.isLogisticsSubscribed ? 'bg-orange-500' : 'bg-slate-800'}`}>

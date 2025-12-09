@@ -30,16 +30,17 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [] }) => {
     loadLogs();
     
     // SETUP REALTIME "EYE OF GOD"
+    // Using a UNIQUE channel ID "audit_viewer_rt" prevents collision with the global app subscription
     const sub1 = subscribeToTable('audit_logs', () => {
         toast("Nouvelle action détectée !", { icon: '🛡️', position: 'bottom-right' });
         loadLogs(); 
         setIsLive(true);
-    });
+    }, 'audit_viewer_rt_audit');
     
     const sub2 = subscribeToTable('user_activity_logs', () => {
         loadLogs();
         setIsLive(true);
-    });
+    }, 'audit_viewer_rt_activity');
 
     return () => {
         sub1.unsubscribe();
