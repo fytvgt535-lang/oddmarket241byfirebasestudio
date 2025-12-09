@@ -6,12 +6,11 @@ import { resetPasswordForEmail } from '../../services/supabaseService';
 interface LoginScreenProps {
   onLogin: (email: string, pass: string) => void;
   onGoToRegister: () => void;
-  onGuestAccess: () => void; // Kept in interface to avoid breaking App.tsx immediately, but unused in UI
-  error?: string;
   isLoading?: boolean;
+  onGuestAccess?: () => void;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, error, isLoading = false }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLoading = false }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
@@ -80,13 +79,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, erro
 
         {/* Form Container */}
         <div className="p-8 pt-2">
-          {error && (
-            <div className="mb-6 bg-red-50 border border-red-100 p-3 rounded-xl flex items-center gap-3 animate-fade-in">
-              <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-              <p className="text-xs font-bold text-red-600">{error}</p>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-gray-400 uppercase mb-1 ml-1">Email</label>

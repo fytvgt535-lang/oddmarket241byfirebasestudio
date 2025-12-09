@@ -4,6 +4,27 @@ export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
 export type Language = 'fr' | 'fang' | 'mpongwe';
 export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
 
+// --- AUDIT & SECURITY ---
+export interface AuditLog {
+  id: string;
+  actorId: string;
+  actorName?: string; // Joined field
+  targetId: string;
+  action: string;
+  oldValue?: any;
+  newValue?: any;
+  reason?: string;
+  createdAt: number;
+}
+
+export interface UserActivity {
+  id: string;
+  userId: string;
+  actionType: 'login' | 'logout' | 'navigation' | 'action';
+  details: string;
+  createdAt: number;
+}
+
 // --- SMART SHOPPER (OFFLINE FEATURES) ---
 export interface LocalVendor {
   id: string;
@@ -97,6 +118,7 @@ export interface User {
   kycDocument?: IdentityDocument;
   createdAt: number;
   lastLogin?: number;
+  lastSeenAt?: number; // New field for realtime status
   marketId?: string;
   stallId?: string;
   bio?: string;

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense, ReactNode, ErrorInfo } from 'react';
-import { Store, LogOut, Loader2 } from 'lucide-react';
-import { supabase } from './supabaseClient';
+import { Store, LogOut, Loader2, Database } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import * as SupabaseService from './services/supabaseService';
 import { Toaster, toast } from 'react-hot-toast';
 import { useAppData } from './hooks/useAppData';
@@ -23,27 +23,35 @@ interface ErrorBoundaryProps { children?: ReactNode }
 interface ErrorBoundaryState { hasError: boolean }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
-
+  public state: ErrorBoundaryState = { hasError: false };
   static getDerivedStateFromError(_: Error): ErrorBoundaryState { return { hasError: true }; }
   componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("Uncaught error:", error, errorInfo); }
   render() { 
     if (this.state.hasError) return <div className="min-h-screen flex items-center justify-center bg-red-50 text-red-600 font-bold p-10">Une erreur critique est survenue. Veuillez rafraîchir.</div>; 
-    return this.props.children; 
+    return (this as any).props.children; 
   }
 }
 
 const App: React.FC = () => {
-  // Auth State
+  if (!isSupabaseConfigured) {
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white p-8 text-center">
+              <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                  <Database className="w-10 h-10 text-white"/>
+              </div>
+              <h1 className="text-3xl font-black mb-4">Base de Données Non Connectée</h1>
+              <p className="text-slate-400 mb-8 max-w-md">L'application ne trouve pas les clés de configuration Supabase.</p>
+          </div>
+      );
+  }
+
   const [session, setSession] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Custom Hook for Data Logic
   const { isDataLoading, loadData, data } = useAppData(session, currentUser);
 
-  // Derived Props Construction
   const currentVendorProfile: VendorProfile = useMemo(() => {
     if (!currentUser) return {} as VendorProfile;
     const myStall = data.stalls.find(s => s.occupantId === currentUser.id);
@@ -64,19 +72,34 @@ const App: React.FC = () => {
     };
   }, [currentUser, data.agents]);
 
-  // Auth Lifecycle
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) fetchUserProfile(session.user.id);
+        setSession(session);
+        if (session?.user) fetchUserProfile(session.user.id);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setSession(session);
-      if (session?.user) fetchUserProfile(session.user.id);
-      else setCurrentUser(null);
+      if (session?.user) fetchUserProfile(session.user.id); else setCurrentUser(null);
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // --- HEARTBEAT SYSTEM (Realtime Presence) ---
+  useEffect(() => {
+      if (!currentUser) return;
+      // Update last_seen immediately on mount
+      SupabaseService.updateUserPresence(currentUser.id, 'app_active');
+      
+      // Update every 60 seconds
+      const interval = setInterval(() => {
+          SupabaseService.updateUserPresence(currentUser.id, 'app_active');
+      }, 60000);
+
+      // Log navigation (Simple implementation)
+      SupabaseService.logUserActivity(currentUser.id, 'navigation', `User active on role: ${currentUser.role}`);
+
+      return () => clearInterval(interval);
+  }, [currentUser]);
 
   const fetchUserProfile = async (uid: string) => {
       const p = await SupabaseService.getCurrentUserProfile(uid);
@@ -84,63 +107,43 @@ const App: React.FC = () => {
           id: p.id, name: p.name, email: p.email, role: p.role, phone: p.phone, isBanned: p.isBanned,
           kycStatus: p.kycStatus, kycDocument: p.kycDocument, createdAt: p.createdAt,
           stallId: p.stallId, marketId: p.marketId, bio: p.bio, photoUrl: p.photoUrl,
-          isLogisticsSubscribed: p.isLogisticsSubscribed, subscriptionExpiry: p.subscriptionExpiry, passwordHash: '***'
+          isLogisticsSubscribed: p.isLogisticsSubscribed, subscriptionExpiry: p.subscriptionExpiry, passwordHash: '***',
+          lastSeenAt: p.lastSeenAt
       });
   };
 
-  // --- ACTIONS HANDLERS (WIRING) ---
+  const handleLogin = async (e: string, p: string) => {
+      setIsAuthLoading(true); 
+      try { await SupabaseService.signInUser(e, p); } catch(err: any) { toast.error(err.message); } finally { setIsAuthLoading(false); }
+  };
+
+  const handleRegister = async (d: any) => {
+      setIsAuthLoading(true); 
+      try { await SupabaseService.signUpUser(d.email, d.password, d); setAuthView('login'); toast.success("Compte créé !"); } catch(err: any) { toast.error(err.message); } finally { setIsAuthLoading(false); }
+  };
+
+  const handleSignOut = async () => { await SupabaseService.signOutUser(); };
+
+  // --- ACTIONS HANDLERS ---
   const handleCreateOrder = async (order: any) => {
-      try {
-          await SupabaseService.createOrder({ ...order, customerId: currentUser?.id });
-          toast.success("Commande envoyée au vendeur !");
-          loadData();
-      } catch (e: any) {
-          toast.error("Echec commande: " + e.message);
-      }
+      try { await SupabaseService.createOrder({ ...order, customerId: currentUser?.id }); toast.success("Commande envoyée !"); loadData(); } catch (e: any) { toast.error(e.message); }
   };
 
   const handleCollectPayment = async (stallId: string, amount: number) => {
-      try {
-          const stall = data.stalls.find(s => s.id === stallId);
-          await SupabaseService.createTransaction({
-              marketId: stall?.marketId, stallNumber: stall?.number,
-              amount, type: 'rent', provider: 'cash', collectedBy: currentUser?.id, reference: `CASH-${Date.now()}`
-          });
-          toast.success("Paiement enregistré !");
-          loadData();
-      } catch (e: any) {
-          toast.error(e.message);
-      }
+      try { const stall = data.stalls.find(s => s.id === stallId); await SupabaseService.createTransaction({ marketId: stall?.marketId, stallNumber: stall?.number, amount, type: 'rent', provider: 'cash', collectedBy: currentUser?.id, reference: `CASH-${Date.now()}` }); toast.success("Paiement enregistré !"); loadData(); } catch (e: any) { toast.error(e.message); }
   };
 
   const handleIssueSanction = async (stallId: string, type: 'warning'|'fine', reason: string, amount: number) => {
-      try {
-          const stall = data.stalls.find(s => s.id === stallId);
-          await SupabaseService.createSanction({
-              marketId: stall?.marketId, stallNumber: stall?.number, stallId,
-              amount, type, reason, issuedBy: currentUser?.id
-          });
-          toast.success("Sanction émise");
-          loadData();
-      } catch (e: any) {
-          toast.error(e.message);
-      }
+      try { await SupabaseService.createSanction({ marketId: data.stalls.find(s => s.id === stallId)?.marketId, stallNumber: data.stalls.find(s => s.id === stallId)?.number, stallId, amount, type, reason, issuedBy: currentUser?.id }); toast.success("Sanction émise"); loadData(); } catch (e: any) { toast.error(e.message); }
   };
 
-  // Auth & Loading Views
-  if (isDataLoading && session) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-12 h-12 text-blue-600 animate-spin"/></div>;
-  
-  if (!session) return authView === 'login' 
-    ? <LoginScreen 
-        onLogin={async (e, p) => { setIsAuthLoading(true); try { await SupabaseService.signInUser(e, p); } catch(err: any) { toast.error(err.message); } finally { setIsAuthLoading(false); } }} 
-        onGoToRegister={() => setAuthView('register')} 
-        isLoading={isAuthLoading} 
-        onGuestAccess={()=>{}}/> 
-    : <RegisterScreen 
-        onRegister={async (d) => { setIsAuthLoading(true); try { await SupabaseService.signUpUser(d.email, d.password, d); setAuthView('login'); toast.success("Compte créé !"); } catch(err: any) { toast.error(err.message); } finally { setIsAuthLoading(false); } }} 
-        onBackToLogin={() => setAuthView('login')} 
-        isLoading={isAuthLoading}/>;
+  const handleReserveStall = async (stallId: string, provider: string, isPriority: boolean) => {
+      if (!currentUser) return;
+      try { await SupabaseService.reserveStall(stallId, currentUser.id); toast.success("Étal réservé !"); await fetchUserProfile(currentUser.id); loadData(); } catch (e: any) { toast.error(e.message); }
+  };
 
+  if (isDataLoading && session) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-12 h-12 text-blue-600 animate-spin"/></div>;
+  if (!session) return authView === 'login' ? <LoginScreen onLogin={handleLogin} onGoToRegister={() => setAuthView('register')} isLoading={isAuthLoading} onGuestAccess={()=>{}}/> : <RegisterScreen onRegister={handleRegister} onBackToLogin={() => setAuthView('login')} isLoading={isAuthLoading}/>;
   if (!currentUser) return null;
 
   return (
@@ -148,14 +151,13 @@ const App: React.FC = () => {
       <Toaster position="top-center" />
       <NetworkStatus />
       
-      {/* Universal Header */}
       <header className={`sticky top-0 z-40 shadow-md ${currentUser.role === 'admin' ? 'bg-slate-900' : currentUser.role === 'vendor' ? 'bg-green-900' : currentUser.role === 'agent' ? 'bg-blue-900' : 'bg-white border-b'} text-white`}>
           <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
               <div className="flex items-center gap-2">
                   <Store className={`w-6 h-6 ${currentUser.role === 'client' ? 'text-green-600' : 'text-white'}`}/>
                   <h1 className={`font-black ${currentUser.role === 'client' ? 'text-slate-900' : 'text-white'}`}>MarchéConnect</h1>
               </div>
-              <button onClick={SupabaseService.signOutUser} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
+              <button onClick={handleSignOut} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
           </div>
       </header>
 
@@ -193,17 +195,15 @@ const App: React.FC = () => {
                     onDeleteProduct={id => SupabaseService.deleteProduct(id).then(()=>loadData())} 
                     onUpdateOrderStatus={()=>{}} 
                     onUpdateProfile={u => SupabaseService.updateUserProfile(currentUser.id, u).then(()=>fetchUserProfile(currentUser.id))} 
-                    onToggleLogistics={() => Promise.resolve()} onReserve={() => {}} 
+                    onToggleLogistics={() => Promise.resolve()} 
+                    onReserve={handleReserveStall} 
                 />
             )}
 
             {currentUser.role === 'client' && (
                 <ClientDashboard 
-                    stalls={data.stalls} 
-                    markets={data.markets} 
-                    products={data.products} 
-                    orders={data.orders.filter(o => o.customerId === currentUser.id)}
-                    onCreateOrder={handleCreateOrder} // WIRED
+                    stalls={data.stalls} markets={data.markets} products={data.products} orders={data.orders.filter(o => o.customerId === currentUser.id)}
+                    onCreateOrder={handleCreateOrder} 
                 />
             )}
 
@@ -211,9 +211,7 @@ const App: React.FC = () => {
                 <AgentFieldTool 
                     stalls={data.stalls} sanctions={data.sanctions} agentLogs={currentAgent.logs} 
                     cashInHand={currentAgent.cashInHand} isShiftActive={currentAgent.isShiftActive} 
-                    onCollectPayment={handleCollectPayment} // WIRED
-                    onIssueSanction={handleIssueSanction} // WIRED
-                    onShiftAction={()=>{}} 
+                    onCollectPayment={handleCollectPayment} onIssueSanction={handleIssueSanction} onShiftAction={()=>{}} 
                 />
             )}
 

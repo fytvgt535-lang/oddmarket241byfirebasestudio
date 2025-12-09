@@ -1,10 +1,12 @@
+
 import React, { useState, useMemo } from 'react';
-import { Activity, Building2, Bell, Users, LayoutGrid, Radar, DollarSign, HeartHandshake, MessageSquare, Settings, X, ShoppingBag, ArrowRight } from 'lucide-react';
-import { Stall, HygieneReport, Transaction, Market, Agent, Expense, SmsCampaign, PaymentPlan, SmsTemplate, Receipt, AppNotification, Sanction, User, ClientOrder } from '../types';
+import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield } from 'lucide-react';
+import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
 import FinanceManager from './admin/FinanceManager';
 import UserManager from './admin/UserManager';
+import AuditLogViewer from './admin/AuditLogViewer';
 import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 interface AdminDashboardProps {
@@ -19,8 +21,8 @@ interface AdminDashboardProps {
   notifications: AppNotification[];
   sanctions?: Sanction[];
   users?: User[];
-  orders?: ClientOrder[]; // NEW
-  onSendSms: (marketId: string, audience: SmsCampaign['targetAudience'], message: string, tone: SmsTemplate['tone']) => void;
+  orders?: ClientOrder[];
+  onSendSms: (marketId: string, audience: any, message: string, tone: any) => void;
   onApprovePlan: (planId: string) => void;
   onAddMarket: (market: Omit<Market, 'id'>) => void;
   onUpdateMarket: (marketId: string, updates: Partial<Market>) => void;
@@ -35,10 +37,10 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-    markets, stalls, reports, transactions = [], receipts, agents, expenses, paymentPlans, notifications, sanctions = [], users = [], orders = [],
-    onSendSms, onApprovePlan, onAddMarket, onUpdateMarket, onDeleteMarket, onResolveAppeal, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls 
+    markets, stalls, reports, transactions = [], expenses, notifications, users = [], orders = [], sanctions = [],
+    onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls 
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'comms' | 'social' | 'geo' | 'markets' | 'users'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'comms' | 'social' | 'geo' | 'markets' | 'users' | 'audit'>('overview');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('all');
   const [showNotifications, setShowNotifications] = useState(false);
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
@@ -48,7 +50,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   
   const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
   const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
   
   const potentialRevenue = stalls.reduce((acc, s) => acc + s.price, 0);
   const collectionRate = Math.round((totalRevenue / (potentialRevenue > 0 ? potentialRevenue : 1)) * 100) || 0;
@@ -56,11 +57,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // --- LIVE FEED LOGIC ---
   const activityFeed = useMemo(() => {
-      // Combine transactions and orders into a single feed sorted by date
       const feedItems = [
           ...filteredTransactions.map(t => ({ ...t, kind: 'transaction' as const })),
           ...orders.map(o => ({ ...o, kind: 'order' as const, amount: o.totalAmount }))
-      ].sort((a, b) => b.date - a.date).slice(0, 10); // Show last 10 activities
+      ].sort((a, b) => b.date - a.date).slice(0, 10); 
       return feedItems;
   }, [filteredTransactions, orders]);
 
@@ -112,6 +112,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button onClick={() => setActiveTab('space')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'space' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500'}`}><LayoutGrid className="w-4 h-4" /> Gestion Espace</button>
           <button onClick={() => setActiveTab('finance')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'finance' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500'}`}><DollarSign className="w-4 h-4" /> Finances</button>
           <button onClick={() => setActiveTab('markets')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'markets' ? 'border-slate-800 text-slate-900' : 'border-transparent text-gray-500'}`}><Settings className="w-4 h-4" /> Config Marchés</button>
+          <button onClick={() => setActiveTab('audit')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'audit' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}><Shield className="w-4 h-4" /> Journal d'Audit</button>
         </nav>
       </div>
 
@@ -152,7 +153,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </ResponsiveContainer>
                 </div>
 
-                {/* LIVE ACTIVITY FEED (New) */}
+                {/* LIVE ACTIVITY FEED */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-96">
                     <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <Activity className="w-5 h-5 text-orange-500"/> Flux d'Activité
@@ -223,8 +224,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'users' && (
           <UserManager 
             users={users} 
+            stalls={stalls}
+            markets={markets}
+            sanctions={sanctions}
             onUpdateUserStatus={onUpdateUserStatus!} 
           />
+      )}
+
+      {activeTab === 'audit' && (
+          <AuditLogViewer users={users} />
       )}
     </div>
   );

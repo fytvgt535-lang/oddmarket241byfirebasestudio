@@ -14,8 +14,8 @@ interface AgentFieldToolProps {
   agentLogs: AgentLog[];
   cashInHand: number;
   isShiftActive: boolean;
-  onCollectPayment: (stallId: string, amount: number, gpsCoordinates: string) => void;
-  onIssueSanction: (stallId: string, type: 'warning' | 'fine', reason: string, amount: number, evidenceUrl?: string) => void;
+  onCollectPayment: (stallId: string, amount: number, gpsCoordinates: string) => Promise<void> | void;
+  onIssueSanction: (stallId: string, type: 'warning' | 'fine', reason: string, amount: number, evidenceUrl?: string) => Promise<void> | void;
   onShiftAction: (action: 'start' | 'end' | 'deposit') => void;
 }
 
@@ -31,26 +31,33 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       setView('action');
   };
 
-  const handlePayment = (amount: number) => {
+  const handlePayment = async (amount: number) => {
       if (!scannedStall) return;
       setIsProcessing(true);
-      setTimeout(() => {
-          onCollectPayment(scannedStall.id, amount, "0.0,0.0");
+      try {
+          await onCollectPayment(scannedStall.id, amount, "0.0,0.0");
           setLastAction({ title: 'Paiement Reçu', amount });
           setView('success');
+      } catch(e) {
+          // Error handling done by toaster in parent
+      } finally {
           setIsProcessing(false);
-      }, 1000);
+      }
   };
 
-  const handleSanction = (infractionId: string) => {
+  const handleSanction = async (infractionId: string) => {
       if (!scannedStall) return;
       setIsProcessing(true);
-      setTimeout(() => {
-          onIssueSanction(scannedStall.id, 'fine', `Infraction ${infractionId}`, 5000); // Amount simulated based on ID
-          setLastAction({ title: 'Sanction Émise', amount: 5000 });
+      try {
+          const fineAmount = 5000; // In real app, derived from infraction ID
+          await onIssueSanction(scannedStall.id, 'fine', `Infraction ${infractionId}`, fineAmount); 
+          setLastAction({ title: 'Sanction Émise', amount: fineAmount });
           setView('success');
+      } catch(e) {
+          // Error handling done by toaster in parent
+      } finally {
           setIsProcessing(false);
-      }, 1000);
+      }
   };
 
   const resetFlow = () => {

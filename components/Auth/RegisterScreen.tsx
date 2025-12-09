@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { User, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle, CreditCard, Loader2, Camera, AlertTriangle, Key } from 'lucide-react';
 import { IdentityType } from '../../types';
-import { checkValueExists } from '../../services/supabaseService';
+import { checkValueExists, uploadFile } from '../../services/supabaseService';
 
 interface RegisterScreenProps {
   onRegister: (data: any) => void;
@@ -14,6 +14,10 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  
+  // Real File Upload State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -94,11 +98,25 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
       setStep(prev => prev - 1);
   };
 
-  const handleFileUpload = () => {
-    // Simulation upload fichier
-    setTimeout(() => {
-        setFormData(prev => ({ ...prev, identityFile: "https://images.unsplash.com/photo-1633265486064-084b5f9940ce?auto=format&fit=crop&q=80&w=300" }));
-    }, 800);
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+        setIsUploading(true);
+        setError(null);
+        try {
+            // REAL UPLOAD TO SUPABASE STORAGE
+            const file = e.target.files[0];
+            const url = await uploadFile(file, 'avatars'); // Storing ID docs in avatars bucket for demo simplicity, ideally separate bucket
+            setFormData(prev => ({ ...prev, identityFile: url }));
+        } catch (err: any) {
+            setError("Erreur upload: " + err.message);
+        } finally {
+            setIsUploading(false);
+        }
+    }
+  };
+
+  const triggerFileUpload = () => {
+      fileInputRef.current?.click();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -229,8 +247,18 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                         </select>
                     </div>
 
-                    <div className="border-2 border-dashed border-gray-300 rounded-2xl p-6 flex flex-col items-center justify-center bg-gray-50 hover:bg-white hover:border-green-500 transition-all cursor-pointer" onClick={handleFileUpload}>
-                        {formData.identityFile ? (
+                    <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,application/pdf" />
+
+                    <div 
+                        className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center transition-all cursor-pointer ${isUploading ? 'bg-gray-100 border-gray-300' : 'bg-gray-50 hover:bg-white border-gray-300 hover:border-green-500'}`} 
+                        onClick={triggerFileUpload}
+                    >
+                        {isUploading ? (
+                            <div className="flex flex-col items-center">
+                                <Loader2 className="w-10 h-10 text-green-600 animate-spin mb-2"/>
+                                <p className="text-sm font-bold text-gray-500">Téléchargement...</p>
+                            </div>
+                        ) : formData.identityFile ? (
                             <div className="relative w-full h-32 bg-gray-200 rounded-lg overflow-hidden shadow-md">
                                 <img src={formData.identityFile} className="w-full h-full object-cover" alt="ID Preview"/>
                                 <div className="absolute inset-0 bg-green-900/40 flex items-center justify-center">
@@ -241,7 +269,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                             <>
                                 <Camera className="w-10 h-10 text-green-600 mb-2 p-2 bg-green-100 rounded-full"/>
                                 <p className="text-sm font-bold text-gray-600">Scanner la pièce</p>
-                                <p className="text-xs text-gray-400 mt-1">Photo claire et lisible</p>
+                                <p className="text-xs text-gray-400 mt-1">Toucher pour importer</p>
                             </>
                         )}
                     </div>
@@ -302,7 +330,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegister, onBackToLog
                         <button 
                             type="submit" 
                             form="register-form"
-                            disabled={!formData.identityFile || isLoading} 
+                            disabled={!formData.identityFile || isLoading || isUploading} 
                             className="flex-1 py-4 bg-green-600 disabled:bg-gray-300 disabled:text-gray-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-green-200 hover:bg-green-700"
                         >
                             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Terminer"}

@@ -2,11 +2,13 @@
 import React, { useState } from 'react';
 import { Stall, PaymentProvider, ProductType, Language } from '../types';
 import { t } from '../services/translations';
-import { ShoppingBag, Smartphone, Baby, Lock, QrCode, Scan, ShieldCheck, RefreshCw, MapPin } from 'lucide-react';
+import { ShoppingBag, Smartphone, Baby, Lock, QrCode, Scan, ShieldCheck, RefreshCw, MapPin, Loader2 } from 'lucide-react';
+import { verifyAgentIdentity } from '../services/supabaseService';
+import toast from 'react-hot-toast';
 
 interface MarketMapProps {
   stalls: Stall[];
-  onReserve: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void;
+  onReserve: (stallId: string, provider: PaymentProvider, isPriority: boolean) => Promise<void> | void;
   language: Language;
 }
 
@@ -30,23 +32,32 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
     }
   };
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
     if (!selectedStall) return;
     setIsProcessing(true);
-    setTimeout(() => {
-      onReserve(selectedStall.id, paymentProvider, isPriorityRequest);
-      setIsProcessing(false);
-      setSelectedStall(null);
-    }, 2000);
+    try {
+        await onReserve(selectedStall.id, paymentProvider, isPriorityRequest);
+        setSelectedStall(null);
+    } catch (e: any) {
+        // Error handled in parent mostly, but we clear loader
+    } finally {
+        setIsProcessing(false);
+    }
   };
   
-  const handleScanAgent = () => {
+  const handleScanAgent = async () => {
       setIsScanMode(true);
-      setTimeout(() => {
-          setIsScanMode(false);
+      try {
+          // REAL NETWORK CALL TO VERIFY AGENT IDENTITY
+          await verifyAgentIdentity();
           setAgentScanned(true);
           setPaymentProvider('cash');
-      }, 1500);
+          toast.success("Agent authentifié par le système.");
+      } catch (e: any) {
+          toast.error("Échec authentification agent: " + e.message);
+      } finally {
+          setIsScanMode(false);
+      }
   };
 
   const filteredStalls = filter === 'all' 
@@ -189,8 +200,8 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
               {!agentScanned && (
                   <div className="mt-2 bg-yellow-50 p-2 rounded border border-yellow-100 text-xs text-yellow-700 flex items-center justify-between">
                       <span>Payer en cash ? Scanner Agent requis.</span>
-                      <button onClick={handleScanAgent} className="bg-yellow-200 px-2 py-1 rounded font-bold hover:bg-yellow-300 flex items-center gap-1">
-                         {isScanMode ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Scan className="w-3 h-3"/>}
+                      <button onClick={handleScanAgent} disabled={isScanMode} className="bg-yellow-200 px-2 py-1 rounded font-bold hover:bg-yellow-300 flex items-center gap-1">
+                         {isScanMode ? <Loader2 className="w-3 h-3 animate-spin"/> : <Scan className="w-3 h-3"/>}
                          Scan
                       </button>
                   </div>
@@ -214,7 +225,7 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
                 disabled={isProcessing}
                 className="flex-1 py-3 px-4 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 flex justify-center items-center gap-2"
               >
-                {isProcessing ? 'Traitement...' : 'Payer & Réserver'}
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Payer & Réserver'}
               </button>
             </div>
           </div>
