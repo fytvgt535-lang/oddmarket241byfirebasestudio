@@ -1,165 +1,298 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, Agent, AppNotification } from '../types';
 import * as SupabaseService from '../services/supabaseService';
 import toast from 'react-hot-toast';
 
-// Helper pour sécuriser les appels API individuels (Cloisonnement des erreurs)
+// Durée de validité du cache en millisecondes (5 minutes)
+const CACHE_TTL = 5 * 60 * 1000;
+
 const fetchSafe = async <T>(promise: Promise<T>, fallback: T, context: string): Promise<T> => {
     try {
         return await promise;
     } catch (e: any) {
-        console.warn(`[Système Modulaire] Le module '${context}' est indisponible temporairement (Erreur: ${e.message}). Activation du fallback.`);
+        console.warn(`[Module ${context}] Indisponible (Offline/Error).`, e);
         return fallback;
     }
 };
 
 export const useAppData = (session: any, currentUser: User | null) => {
-  const [isDataLoading, setIsDataLoading] = useState(true);
+  // Global loading (for initial app mount only)
+  const [isGlobalLoading, setIsGlobalLoading] = useState(true);
   
-  // Data State
+  // Granular Loading States
+  const [loadingStates, setLoadingStates] = useState({
+      finance: false,
+      users: false,
+      products: false,
+      orders: false
+  });
+
+  // --- STATE CORE (Structurel - Chargé au démarrage) ---
   const [markets, setMarkets] = useState<Market[]>([]); 
   const [stalls, setStalls] = useState<Stall[]>([]); 
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // --- STATE LAZY (Données lourdes) ---
   const [products, setProducts] = useState<Product[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [financialStats, setFinancialStats] = useState({ totalRevenue: 0, totalExpenses: 0, netBalance: 0 });
   const [expenses, setExpenses] = useState<Expense[]>([]); 
   const [orders, setOrders] = useState<ClientOrder[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [sanctions, setSanctions] = useState<Sanction[]>([]);
   
-  // Mocks/Placeholders pour fonctionnalités futures
+  // Placeholders
   const [reports] = useState<any[]>([]);
   const [receipts] = useState<any[]>([]);
   const [paymentPlans] = useState<any[]>([]);
-  const [sanctions] = useState<Sanction[]>([]);
   const [agents] = useState<Agent[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  const loadData = useCallback(async () => {
+  // --- CACHE MANAGEMENT ---
+  // Stores timestamp of last successful fetch for each segment
+  const lastFetchRef = useRef<{ [key: string]: number }>({});
+  const subscriptionsRef = useRef<any[]>([]);
+
+  // --- ACTIONS (Optimistic UI Patterns) ---
+  const actions = {
+      createMarket: async (marketData: any) => {
+          try {
+              const newMarket = await SupabaseService.createMarket(marketData);
+              if (newMarket) {
+                  setMarkets(prev => [...prev, newMarket]);
+                  toast.success("Marché initialisé");
+              }
+          } catch (e: any) { toast.error(e.message); }
+      },
+      updateMarket: async (id: string, data: any) => {
+          setMarkets(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+          try { await SupabaseService.updateMarket(id, data); } catch (e) { loadCoreData(); }
+      },
+      deleteMarket: async (id: string) => {
+          setMarkets(prev => prev.filter(m => m.id !== id));
+          SupabaseService.deleteMarket(id).catch(() => loadCoreData());
+      },
+      createStall: async (stallData: any) => {
+          try {
+              const newStall = await SupabaseService.createStall(stallData);
+              setStalls(prev => [...prev, newStall]);
+              toast.success("Étal ajouté");
+          } catch (e: any) { toast.error(e.message); }
+      },
+      bulkCreateStalls: async (stallsData: any[]) => {
+          try {
+              await SupabaseService.createBulkStalls(stallsData);
+              // Force refresh logic would go here
+              const freshStalls = await SupabaseService.fetchStalls();
+              setStalls(freshStalls);
+              toast.success("Génération terminée");
+          } catch (e: any) { toast.error(e.message); }
+      },
+      deleteStall: async (id: string) => {
+          setStalls(prev => prev.filter(s => s.id !== id));
+          SupabaseService.deleteStall(id);
+      },
+      createExpense: async (expenseData: any) => {
+          try {
+              const newExp = await SupabaseService.createExpense(expenseData);
+              setExpenses(prev => [newExp, ...prev]);
+              // Recalcul simple des stats locales pour éviter un reload
+              setFinancialStats(prev => ({ 
+                  ...prev, 
+                  totalExpenses: prev.totalExpenses + newExp.amount, 
+                  netBalance: prev.netBalance - newExp.amount 
+              }));
+          } catch (e: any) { toast.error(e.message); }
+      },
+      deleteExpense: async (id: string) => {
+          setExpenses(prev => prev.filter(e => e.id !== id));
+          SupabaseService.deleteExpense(id);
+      },
+      createProduct: async (prodData: any) => {
+          try {
+              const newProd = await SupabaseService.createProduct(prodData);
+              setProducts(prev => [...prev, newProd]);
+              return newProd;
+          } catch (e: any) { throw e; }
+      },
+      updateProduct: async (id: string, updates: any) => {
+          setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+          await SupabaseService.updateProduct(id, updates);
+      },
+      deleteProduct: async (id: string) => {
+          setProducts(prev => prev.filter(p => p.id !== id));
+          await SupabaseService.deleteProduct(id);
+      },
+      createOrder: async (orderData: any) => {
+          await SupabaseService.createOrder(orderData);
+          // Realtime will pick it up
+      },
+      updateOrderStatus: async (orderId: string, status: any) => {
+          setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+          await SupabaseService.updateOrderStatus(orderId, status);
+      },
+      updateUserStatus: async (userId: string, updates: any) => {
+          setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...updates } : u));
+          await SupabaseService.adminUpdateUserStatus(userId, updates);
+      }
+  };
+
+  // --- LAZY LOADERS (Smart Caching) ---
+  
+  const lazyLoaders = {
+      loadFinance: async (forceRefresh = false) => {
+          const now = Date.now();
+          if (!forceRefresh && lastFetchRef.current['finance'] && (now - lastFetchRef.current['finance'] < CACHE_TTL)) {
+              return; // Cache hit
+          }
+
+          setLoadingStates(prev => ({ ...prev, finance: true }));
+          try {
+              const [trans, exps, stats] = await Promise.all([
+                  fetchSafe(SupabaseService.fetchTransactions(1, 200), { transactions: [], count: 0 }, 'Transactions'),
+                  fetchSafe(SupabaseService.fetchExpenses(), [], 'Dépenses'),
+                  fetchSafe(SupabaseService.fetchFinancialStats(), { totalRevenue: 0, totalExpenses: 0, netBalance: 0 }, 'Stats')
+              ]);
+              setRecentTransactions(trans.transactions);
+              setExpenses(exps);
+              setFinancialStats(stats);
+              lastFetchRef.current['finance'] = now;
+          } finally {
+              setLoadingStates(prev => ({ ...prev, finance: false }));
+          }
+      },
+
+      loadUsers: async (forceRefresh = false) => {
+          const now = Date.now();
+          if (!forceRefresh && lastFetchRef.current['users'] && (now - lastFetchRef.current['users'] < CACHE_TTL)) return;
+
+          setLoadingStates(prev => ({ ...prev, users: true }));
+          try {
+              const usersData = await fetchSafe(SupabaseService.fetchProfiles(), [], 'Utilisateurs');
+              setUsers(usersData);
+              lastFetchRef.current['users'] = now;
+          } finally {
+              setLoadingStates(prev => ({ ...prev, users: false }));
+          }
+      },
+
+      loadProducts: async (forceRefresh = false) => {
+          const now = Date.now();
+          if (!forceRefresh && lastFetchRef.current['products'] && (now - lastFetchRef.current['products'] < CACHE_TTL)) return;
+
+          setLoadingStates(prev => ({ ...prev, products: true }));
+          try {
+              const prods = await fetchSafe(SupabaseService.fetchProducts(), [], 'Produits');
+              if (currentUser?.role === 'vendor') {
+                  setProducts(prods.filter(p => p.stallId === currentUser.stallId));
+              } else {
+                  setProducts(prods);
+              }
+              lastFetchRef.current['products'] = now;
+          } finally {
+              setLoadingStates(prev => ({ ...prev, products: false }));
+          }
+      },
+
+      loadOrders: async (forceRefresh = false) => {
+          const now = Date.now();
+          if (!forceRefresh && lastFetchRef.current['orders'] && (now - lastFetchRef.current['orders'] < CACHE_TTL)) return;
+
+          setLoadingStates(prev => ({ ...prev, orders: true }));
+          try {
+              const ords = await fetchSafe(SupabaseService.fetchOrders(), [], 'Commandes');
+              setOrders(ords);
+              lastFetchRef.current['orders'] = now;
+          } finally {
+              setLoadingStates(prev => ({ ...prev, orders: false }));
+          }
+      }
+  };
+
+  // --- INITIAL CORE LOAD ---
+  const loadCoreData = useCallback(async () => {
     if (!session || !currentUser) { 
-        setIsDataLoading(false); 
+        setIsGlobalLoading(false); 
         return; 
     }
     
     try {
-        const role = currentUser.role;
+        const [marketsData, stallsData] = await Promise.all([
+            SupabaseService.fetchMarkets(),
+            fetchSafe(SupabaseService.fetchStalls(), [], 'Étals')
+        ]);
         
-        // 1. Données Critiques (Marchés)
-        try {
-            const marketsData = await SupabaseService.fetchMarkets();
-            setMarkets(marketsData);
-        } catch (e) {
-            console.error("Erreur critique: Impossible de charger les marchés.");
-        }
+        setMarkets(marketsData);
+        setStalls(stallsData);
 
-        // 2. Chargement Modulaire basé sur le Rôle
-        if (role === 'admin') {
-            const [stallsData, prodsData, transData, expData, ordersData, usersData, statsData] = await Promise.all([
-                fetchSafe(SupabaseService.fetchStalls(), [], 'Gestion Étals'),
-                fetchSafe(SupabaseService.fetchProducts(), [], 'Gestion Produits'),
-                fetchSafe(SupabaseService.fetchTransactions(1, 50), { transactions: [], count: 0 }, 'Transactions'),
-                fetchSafe(SupabaseService.fetchExpenses(), [], 'Comptabilité'),
-                fetchSafe(SupabaseService.fetchOrders(), [], 'Commandes'),
-                fetchSafe(SupabaseService.fetchProfiles(), [], 'Utilisateurs'),
-                fetchSafe(SupabaseService.fetchFinancialStats(), { totalRevenue: 0, totalExpenses: 0, netBalance: 0 }, 'Statistiques')
-            ]);
-
-            setStalls(stallsData);
-            setProducts(prodsData);
-            setRecentTransactions(transData.transactions);
-            setExpenses(expData);
-            setOrders(ordersData);
-            setUsers(usersData);
-            setFinancialStats(statsData);
-
-        } else if (role === 'vendor') {
-            const [stallsData, prodsData, ordersData, transData] = await Promise.all([
-                fetchSafe(SupabaseService.fetchStalls(), [], 'Étals'),
-                fetchSafe(SupabaseService.fetchProducts(), [], 'Mes Produits'),
-                fetchSafe(SupabaseService.fetchOrders(), [], 'Mes Commandes'),
-                fetchSafe(SupabaseService.fetchTransactions(1, 50), { transactions: [], count: 0 }, 'Historique')
-            ]);
-            setStalls(stallsData);
-            setProducts(prodsData.filter(p => p.stallId === currentUser.stallId)); 
-            setOrders(ordersData); 
-            setRecentTransactions(transData.transactions);
-
-        } else if (role === 'client') {
-            const [stallsData, prodsData] = await Promise.all([
-                fetchSafe(SupabaseService.fetchStalls(), [], 'Étals Publics'), 
-                fetchSafe(SupabaseService.fetchProducts(), [], 'Catalogue')
-            ]);
-            setStalls(stallsData);
-            setProducts(prodsData);
-
-        } else if (role === 'agent') {
-            const stallsData = await fetchSafe(SupabaseService.fetchStalls(), [], 'Parc Étals');
-            setStalls(stallsData);
+        // Pre-fetch based on role importance
+        if (currentUser.role === 'vendor') {
+            lazyLoaders.loadProducts(); // Vendor needs products immediately
         }
 
     } catch (error: any) {
-        console.error("Erreur globale non capturée:", error);
-        toast.error("Connexion instable : certaines données sont temporairement indisponibles.", { duration: 5000, icon: '⚠️' });
+        console.error("Core Load Error:", error);
+        toast.error("Mode hors-ligne partiel.");
     } finally {
-        setIsDataLoading(false);
+        setIsGlobalLoading(false);
     }
   }, [session, currentUser]);
 
-  // Initial Load
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadCoreData(); }, [loadCoreData]);
 
-  // Real-time Subscriptions (Fault Tolerant & Unique Channels)
+  // --- REALTIME SUBSCRIPTIONS (Invalidate Cache on Change) ---
   useEffect(() => {
     if (!session || !currentUser) return;
 
-    const refreshData = () => { loadData(); };
-    const subscriptions: any[] = [];
+    subscriptionsRef.current.forEach(sub => sub.unsubscribe());
+    subscriptionsRef.current = [];
 
-    const safeSubscribe = (table: string, callback: (payload: any) => void) => {
-        try {
-            // UNIQUE CHANNEL NAME: global_data_{table}
-            // Ensures this subscription does not conflict with local component subscriptions
-            const sub = SupabaseService.subscribeToTable(table, callback, `global_data_${table}`);
-            subscriptions.push(sub);
-        } catch (e) {
-            console.warn(`Impossible de s'abonner au temps réel pour ${table}`);
-        }
+    // Quand une donnée change, on invalide le cache pour forcer un re-fetch au prochain accès
+    const invalidateCache = (segment: string) => {
+        delete lastFetchRef.current[segment];
     };
 
-    safeSubscribe('markets', refreshData);
+    const subscribe = (table: string, segment: string, callback?: () => void) => {
+        const channelId = `lazy_${table}_${currentUser.id}`;
+        const sub = SupabaseService.subscribeToTable(table, () => {
+            invalidateCache(segment);
+            if (callback) callback();
+        }, channelId);
+        subscriptionsRef.current.push(sub);
+    };
 
+    // Global Critical Data - Always reload
+    subscribe('markets', 'core', loadCoreData);
+    subscribe('stalls', 'core', loadCoreData);
+
+    // Contextual Data
     if (currentUser.role === 'admin') {
-        safeSubscribe('stalls', refreshData);
-        safeSubscribe('transactions', refreshData);
-        safeSubscribe('client_orders', refreshData);
-        safeSubscribe('expenses', refreshData); 
-        safeSubscribe('profiles', refreshData);
-    } 
-    else if (currentUser.role === 'vendor') {
-        safeSubscribe('client_orders', (payload) => {
-            if (payload.eventType === 'INSERT') toast.success("Nouvelle commande reçue !");
-            refreshData();
+        subscribe('transactions', 'finance');
+        subscribe('expenses', 'finance');
+        subscribe('profiles', 'users');
+    } else if (currentUser.role === 'vendor') {
+        subscribe('products', 'products', () => lazyLoaders.loadProducts(true)); // Auto refresh for own products
+        subscribe('client_orders', 'orders', () => {
+            toast.success("Mise à jour commande !");
+            lazyLoaders.loadOrders(true);
         });
-        safeSubscribe('products', refreshData);
-    }
-    else if (currentUser.role === 'agent') {
-        safeSubscribe('stalls', refreshData);
     }
 
     return () => {
-        subscriptions.forEach(sub => sub && sub.unsubscribe());
+        subscriptionsRef.current.forEach(sub => sub.unsubscribe());
+        subscriptionsRef.current = [];
     };
-  }, [session, currentUser, loadData]);
+  }, [session, currentUser, loadCoreData]);
 
   return {
-    isDataLoading,
-    loadData,
+    isDataLoading: isGlobalLoading, // Only global initial load
+    loadingStates, // Granular states for UI spinners
+    loadData: loadCoreData, 
+    lazyLoaders,
+    actions,
     data: {
       markets, stalls, products, recentTransactions, financialStats, expenses, orders, users,
-      reports, receipts, paymentPlans, sanctions, agents, notifications
-    },
-    setters: {
-        setMarkets, setStalls, setProducts, setExpenses, setOrders, setUsers
+      sanctions, notifications, reports, receipts, paymentPlans, agents 
     }
   };
 };

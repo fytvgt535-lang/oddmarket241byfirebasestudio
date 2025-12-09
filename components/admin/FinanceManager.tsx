@@ -15,9 +15,10 @@ interface FinanceManagerProps {
   expenses: Expense[];
   onAddExpense: (expense: Omit<Expense, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
+  loading?: boolean;
 }
 
-const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAddExpense, onDeleteExpense }) => {
+const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAddExpense, onDeleteExpense, loading = false }) => {
   // DATE FILTERS
   const [startDate, setStartDate] = useState<string>(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -27,7 +28,7 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [page, setPage] = useState(1);
   const [limit] = useState(20);
-  const [isLoading, setIsLoading] = useState(false);
+  const [localLoading, setLocalLoading] = useState(false);
 
   // EXPENSE FORM
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -35,7 +36,7 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
 
   const loadTransactions = async () => {
-      setIsLoading(true);
+      setLocalLoading(true);
       try {
           const start = new Date(startDate).getTime();
           const end = new Date(endDate).getTime();
@@ -46,7 +47,7 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
           console.error(error);
           toast.error("Erreur chargement transactions");
       } finally {
-          setIsLoading(false);
+          setLocalLoading(false);
       }
   };
 
@@ -77,21 +78,23 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
       }
   };
 
+  const isAnyLoading = loading || localLoading;
+
   return (
     <div className="space-y-6 animate-fade-in">
         {/* KPI */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="p-5 border-l-4 border-l-green-500">
                 <p className="text-xs font-bold text-gray-400 uppercase mb-1">Recettes (Période)</p>
-                <h3 className="text-3xl font-black text-green-600">{totalRevenue.toLocaleString()} F</h3>
+                {isAnyLoading ? <div className="h-9 w-24 bg-gray-200 animate-pulse rounded"></div> : <h3 className="text-3xl font-black text-green-600">{totalRevenue.toLocaleString()} F</h3>}
             </Card>
             <Card className="p-5 border-l-4 border-l-red-500">
                 <p className="text-xs font-bold text-gray-400 uppercase mb-1">Dépenses Totales</p>
-                <h3 className="text-3xl font-black text-red-600">{totalExpenses.toLocaleString()} F</h3>
+                {isAnyLoading ? <div className="h-9 w-24 bg-gray-200 animate-pulse rounded"></div> : <h3 className="text-3xl font-black text-red-600">{totalExpenses.toLocaleString()} F</h3>}
             </Card>
             <Card className="p-5 border-l-4 border-l-blue-500">
                 <p className="text-xs font-bold text-gray-400 uppercase mb-1">Solde Net</p>
-                <h3 className={`text-3xl font-black ${netBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>{netBalance.toLocaleString()} F</h3>
+                {isAnyLoading ? <div className="h-9 w-24 bg-gray-200 animate-pulse rounded"></div> : <h3 className={`text-3xl font-black ${netBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>{netBalance.toLocaleString()} F</h3>}
             </Card>
         </div>
 
@@ -100,7 +103,7 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
             <div className="flex gap-4 items-end w-full md:w-auto">
                 <Input label="Du" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40"/>
                 <Input label="Au" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-40"/>
-                <Button variant="ghost" onClick={loadTransactions} title="Actualiser" className="mb-0.5 h-[46px]"><RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`}/></Button>
+                <Button variant="ghost" onClick={loadTransactions} title="Actualiser" className="mb-0.5 h-[46px]"><RefreshCw className={`w-5 h-5 ${isAnyLoading ? 'animate-spin' : ''}`}/></Button>
             </div>
             <Button variant="outline" leftIcon={Download}>Export CSV</Button>
         </Card>
@@ -152,7 +155,7 @@ const FinanceManager: React.FC<FinanceManagerProps> = ({ markets, expenses, onAd
                     <tr><th className="p-4">Date</th><th className="p-4">Réf</th><th className="p-4">Type</th><th className="p-4">Étal</th><th className="p-4 text-right">Montant</th></tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                    {isLoading ? <tr><td colSpan={5} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500"/></td></tr> : 
+                    {isAnyLoading ? <tr><td colSpan={5} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500"/></td></tr> : 
                      transactions.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-400">Aucune transaction.</td></tr> :
                      transactions.map(t => (
                         <tr key={t.id} className="hover:bg-gray-50">

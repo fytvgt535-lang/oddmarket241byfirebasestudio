@@ -1,11 +1,10 @@
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Shield, User, Clock, Search, RefreshCw, Loader2, Eye, Activity, Database, AlertCircle, Smartphone, Monitor, Globe, Info } from 'lucide-react';
 import { AuditLog, User as UserType } from '../../types';
 import { fetchAuditLogs, subscribeToTable } from '../../services/supabaseService';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
-import { Badge } from '../ui/Badge';
 import toast from 'react-hot-toast';
 
 interface AuditLogViewerProps {
@@ -19,34 +18,37 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [] }) => {
   const [selectedActorId, setSelectedActorId] = useState<string | 'all'>('all');
   const [isLive, setIsLive] = useState(false);
 
-  const loadLogs = async () => {
-    setIsLoading(true);
-    const data = await fetchAuditLogs();
-    setLogs(data);
-    setIsLoading(false);
-  };
+  // Fonction de chargement stable mémorisée
+  const loadLogs = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
+    try {
+        const data = await fetchAuditLogs();
+        setLogs(data);
+    } catch (e) {
+        console.error("Erreur chargement logs", e);
+    } finally {
+        if (!silent) setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadLogs();
     
     // SETUP REALTIME "EYE OF GOD"
-    // Using a UNIQUE channel ID "audit_viewer_rt" prevents collision with the global app subscription
-    const sub1 = subscribeToTable('audit_logs', () => {
-        toast("Nouvelle action détectée !", { icon: '🛡️', position: 'bottom-right' });
-        loadLogs(); 
-        setIsLive(true);
-    }, 'audit_viewer_rt_audit');
-    
-    const sub2 = subscribeToTable('user_activity_logs', () => {
-        loadLogs();
-        setIsLive(true);
-    }, 'audit_viewer_rt_activity');
+    // L'abonnement est fait une seule fois au montage.
+    // Lors d'un event, on recharge les logs silencieusement pour mettre à jour la liste.
+    const sub1 = subscribeToTable('audit_logs', (payload) => {
+        if (payload.eventType === 'INSERT') {
+            toast("Nouvelle activité système", { icon: '🛡️', position: 'bottom-right', style: { fontSize: '12px', background: '#333', color: '#fff' } });
+            setIsLive(true);
+            loadLogs(true); // Silent refresh
+        }
+    }, 'audit_viewer_unique_channel'); // ID unique critique ici
 
     return () => {
         sub1.unsubscribe();
-        sub2.unsubscribe();
     };
-  }, []);
+  }, [loadLogs]);
 
   // Auto-hide live indicator
   useEffect(() => {
@@ -130,7 +132,7 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [] }) => {
                     onChange={e => setSearch(e.target.value)}
                     className="w-64 bg-gray-50 border-transparent focus:bg-white"
                 />
-                <button onClick={loadLogs} className="p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors">
+                <button onClick={() => loadLogs(false)} className="p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors">
                     <RefreshCw className={`w-5 h-5 text-gray-600 ${isLoading ? 'animate-spin' : ''}`}/>
                 </button>
             </div>

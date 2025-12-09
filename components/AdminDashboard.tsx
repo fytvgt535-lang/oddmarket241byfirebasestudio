@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
-import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2 } from 'lucide-react';
 import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
@@ -22,6 +22,13 @@ interface AdminDashboardProps {
   sanctions?: Sanction[];
   users?: User[];
   orders?: ClientOrder[];
+  
+  // Loading States & Triggers
+  loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean };
+  onLoadFinance?: () => void;
+  onLoadUsers?: () => void;
+  
+  // Actions
   onSendSms: (marketId: string, audience: any, message: string, tone: any) => void;
   onApprovePlan: (planId: string) => void;
   onAddMarket: (market: Omit<Market, 'id'>) => void;
@@ -38,6 +45,7 @@ interface AdminDashboardProps {
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
     markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], receipts = [], agents = [], paymentPlans = [],
+    loadingStates, onLoadFinance, onLoadUsers,
     onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls 
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'comms' | 'social' | 'geo' | 'markets' | 'users' | 'audit'>('overview');
@@ -45,17 +53,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
 
+  // SMART LAZY LOADING TRIGGERS
+  useEffect(() => {
+      if (activeTab === 'finance' || activeTab === 'overview') {
+          onLoadFinance && onLoadFinance();
+      }
+      if (activeTab === 'users' || activeTab === 'audit') {
+          onLoadUsers && onLoadUsers();
+      }
+  }, [activeTab, onLoadFinance, onLoadUsers]);
+
   // Overview Calculations
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
-  
   const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
   const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
-  
   const potentialRevenue = stalls.reduce((acc, s) => acc + s.price, 0);
   const collectionRate = Math.round((totalRevenue / (potentialRevenue > 0 ? potentialRevenue : 1)) * 100) || 0;
   const unreadNotifs = notifications.filter(n => !n.read).length;
 
-  // --- LIVE FEED LOGIC ---
   const activityFeed = useMemo(() => {
       const feedItems = [
           ...filteredTransactions.map(t => ({ ...t, kind: 'transaction' as const })),
@@ -66,7 +81,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6 relative">
-      {/* Notifications Panel */}
+      {/* Notifications Overlay */}
       {showNotifications && (
          <div className="absolute top-16 right-4 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-fade-in">
              <div className="bg-gray-50 p-3 border-b border-gray-100 flex justify-between items-center">
@@ -105,14 +120,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex gap-6 overflow-x-auto">
-          <button onClick={() => setActiveTab('overview')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'overview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'}`}><Activity className="w-4 h-4" /> Vue 360°</button>
-          <button onClick={() => setActiveTab('users')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'users' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'}`}><Users className="w-4 h-4" /> Utilisateurs</button>
-          <button onClick={() => setActiveTab('space')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'space' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500'}`}><LayoutGrid className="w-4 h-4" /> Gestion Espace</button>
-          <button onClick={() => setActiveTab('finance')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'finance' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500'}`}><DollarSign className="w-4 h-4" /> Finances</button>
-          <button onClick={() => setActiveTab('markets')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'markets' ? 'border-slate-800 text-slate-900' : 'border-transparent text-gray-500'}`}><Settings className="w-4 h-4" /> Config Marchés</button>
-          <button onClick={() => setActiveTab('audit')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 whitespace-nowrap ${activeTab === 'audit' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}><Shield className="w-4 h-4" /> Journal d'Audit</button>
+      <div className="border-b border-gray-200 overflow-x-auto">
+        <nav className="-mb-px flex gap-6 min-w-max">
+          <button onClick={() => setActiveTab('overview')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'}`}><Activity className="w-4 h-4" /> Vue 360°</button>
+          <button onClick={() => setActiveTab('users')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'users' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'}`}>
+              <Users className="w-4 h-4" /> Utilisateurs
+              {loadingStates?.users && <Loader2 className="w-3 h-3 animate-spin"/>}
+          </button>
+          <button onClick={() => setActiveTab('space')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'space' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500'}`}><LayoutGrid className="w-4 h-4" /> Gestion Espace</button>
+          <button onClick={() => setActiveTab('finance')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'finance' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500'}`}>
+              <DollarSign className="w-4 h-4" /> Finances
+              {loadingStates?.finance && <Loader2 className="w-3 h-3 animate-spin"/>}
+          </button>
+          <button onClick={() => setActiveTab('markets')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'markets' ? 'border-slate-800 text-slate-900' : 'border-transparent text-gray-500'}`}><Settings className="w-4 h-4" /> Config Marchés</button>
+          <button onClick={() => setActiveTab('audit')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'audit' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}><Shield className="w-4 h-4" /> Journal d'Audit</button>
         </nav>
       </div>
 
@@ -131,7 +152,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
                     <p className="text-sm text-gray-500 font-medium mb-1">Utilisateurs</p>
-                    <h3 className="text-2xl font-bold text-gray-800">{users.length}</h3>
+                    {loadingStates?.users ? <Loader2 className="w-5 h-5 animate-spin text-gray-400"/> : <h3 className="text-2xl font-bold text-gray-800">{users.length}</h3>}
                 </div>
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
                     <p className="text-sm text-gray-500 font-medium mb-1">Alertes Hygiène</p>
@@ -140,7 +161,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Main Chart */}
                 <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-96">
                     <h3 className="font-bold text-gray-800 mb-4">Évolution Financière</h3>
                     <ResponsiveContainer width="100%" height="100%">
@@ -153,14 +173,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </ResponsiveContainer>
                 </div>
 
-                {/* LIVE ACTIVITY FEED */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-96">
                     <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <Activity className="w-5 h-5 text-orange-500"/> Flux d'Activité
                         <span className="animate-pulse w-2 h-2 bg-green-500 rounded-full ml-auto"></span>
                     </h3>
                     <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                        {activityFeed.length === 0 ? (
+                        {loadingStates?.finance ? (
+                            <div className="flex justify-center items-center h-full text-gray-400"><Loader2 className="w-8 h-8 animate-spin"/></div>
+                        ) : activityFeed.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-10">En attente d'activité...</p>
                         ) : (
                             activityFeed.map((item: any) => (
@@ -216,6 +237,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <FinanceManager 
             markets={markets} 
             expenses={expenses} 
+            loading={loadingStates?.finance}
             onAddExpense={onAddExpense!} 
             onDeleteExpense={onDeleteExpense!} 
           />
@@ -227,12 +249,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             stalls={stalls}
             markets={markets}
             sanctions={sanctions}
+            loading={loadingStates?.users}
             onUpdateUserStatus={onUpdateUserStatus!} 
           />
       )}
 
       {activeTab === 'audit' && (
-          <AuditLogViewer users={users} />
+          <AuditLogViewer users={users} loading={loadingStates?.users} />
       )}
     </div>
   );

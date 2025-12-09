@@ -1,14 +1,12 @@
 
 import { supabase } from '../supabaseClient';
-import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, Expense, Sanction, AppNotification, Agent, AuditLog } from '../types';
+import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, Expense, Sanction, AppNotification, Agent, AuditLog, AppRole } from '../types';
 
 // --- CONFIGURATION ---
 const QUEUE_KEY = 'mc_action_queue';
 const FAILED_QUEUE_KEY = 'mc_failed_queue';
-const CACHE_PREFIX = 'mc_cache_';
 
 // --- OFFLINE QUEUE SYSTEM ---
-
 interface QueueItem {
   id: number;
   action: string;
@@ -77,6 +75,7 @@ const executeAction = async (action: string, payload: any) => {
     case 'updateProduct': return updateProduct(payload.id, payload.updates, true);
     case 'createOrder': return createOrder(payload, true);
     case 'updateUserProfile': return updateUserProfile(payload.id, payload.updates, true);
+    case 'reserveStall': return reserveStall(payload.stallId, payload.userId, undefined, undefined, true);
     default: throw new Error(`Unknown action: ${action}`);
   }
 };
@@ -113,125 +112,174 @@ export const syncOfflineQueue = async () => {
   return processedCount;
 };
 
-// ==================================================================================
-// CACHE PATCHING UTILS (Local-First Mutations)
-// ==================================================================================
+// --- HELPER FUNCTIONS ---
 
-const patchLocalCache = <T>(key: string, updateFn: (data: T) => T) => {
-    const fullKey = `${CACHE_PREFIX}${key}`;
-    const cachedStr = localStorage.getItem(fullKey);
-    if (cachedStr) {
-        try {
-            const cachedObj = JSON.parse(cachedStr);
-            const newData = updateFn(cachedObj.data);
-            localStorage.setItem(fullKey, JSON.stringify({ ...cachedObj, data: newData }));
-        } catch (e) {
-            console.error("Cache patch failed", e);
-        }
-    }
+const mapProfile = (data: any): User => ({
+  id: data.id,
+  email: data.email || '',
+  passwordHash: '', 
+  role: (data.role as AppRole) || 'client',
+  name: data.name || '',
+  phone: data.phone || '',
+  isBanned: data.is_banned || false,
+  kycStatus: data.kyc_status || 'none',
+  kycDocument: data.kyc_document,
+  createdAt: new Date(data.created_at).getTime(),
+  lastLogin: data.last_login ? new Date(data.last_login).getTime() : undefined,
+  lastSeenAt: data.last_seen_at ? new Date(data.last_seen_at).getTime() : undefined,
+  marketId: data.market_id,
+  stallId: data.stall_id,
+  bio: data.bio,
+  photoUrl: data.photo_url,
+  isLogisticsSubscribed: data.is_logistics_subscribed,
+  subscriptionExpiry: data.subscription_expiry ? new Date(data.subscription_expiry).getTime() : undefined,
+  addresses: data.addresses,
+  shoppingList: data.shopping_list,
+  loyaltyPoints: data.loyalty_points,
+  favorites: data.favorites,
+  preferences: data.preferences
+});
+
+// Mapping Helper: DB (snake_case) -> App (camelCase)
+const mapMarketFromDB = (m: any): Market => ({
+    id: m.id,
+    name: m.name,
+    city: m.city,
+    neighborhood: m.neighborhood,
+    targetRevenue: m.target_revenue,
+    capacity: m.capacity,
+    baseRent: m.base_rent,
+    hasDeliveryService: m.has_delivery_service,
+    description: m.description,
+    image: m.image_url
+});
+
+// Mapping Helper: App (camelCase) -> DB (snake_case)
+const mapMarketToDB = (m: any) => {
+    const payload: any = {};
+    if (m.name !== undefined) payload.name = m.name;
+    if (m.city !== undefined) payload.city = m.city;
+    if (m.neighborhood !== undefined) payload.neighborhood = m.neighborhood;
+    if (m.targetRevenue !== undefined) payload.target_revenue = m.targetRevenue;
+    if (m.capacity !== undefined) payload.capacity = m.capacity;
+    if (m.baseRent !== undefined) payload.base_rent = m.baseRent;
+    if (m.hasDeliveryService !== undefined) payload.has_delivery_service = m.hasDeliveryService;
+    if (m.description !== undefined) payload.description = m.description;
+    if (m.image !== undefined) payload.image_url = m.image; 
+    return payload;
 };
 
-// --- DATA WRAPPERS (Queue-Aware & Cache-Patching) ---
+// --- AUTHENTICATION & USER MANAGEMENT ---
+
+export const signInUser = async (email: string, pass: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) throw error;
+    return data;
+};
+
+export const signUpUser = async (email: string, pass: string, meta: any) => {
+    const { data, error } = await supabase.auth.signUp({ 
+        email, 
+        password: pass,
+        options: {
+            data: {
+                name: meta.name,
+                role: meta.accountType,
+                kyc_document: meta.kycDocument
+            }
+        }
+    });
+    if (error) throw error;
+    return data;
+};
+
+export const signOutUser = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+};
+
+export const resetPasswordForEmail = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + '/reset-password',
+    });
+    if (error) throw error;
+};
+
+export const updateUserPassword = async (newPass: string, currentPass?: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPass });
+    if (error) throw error;
+};
+
+export const verifyPassword = async (email: string, pass: string): Promise<boolean> => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    return !error && !!data.user;
+};
+
+export const deleteUserAccount = async (password: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !user.email) throw new Error("Non connecté");
+    
+    const verified = await verifyPassword(user.email, password);
+    if (!verified) throw new Error("Mot de passe incorrect");
+
+    console.warn("Account deletion requested.");
+    await signOutUser();
+};
+
+export const checkValueExists = async (column: string, value: string): Promise<boolean> => {
+    const { count, error } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq(column, value);
+    if (error) throw error;
+    return (count || 0) > 0;
+};
+
+// --- DATA WRAPPERS ---
 
 export const createTransaction = async (t: any, forceOnline = false) => {
     const newTx = { ...t, date: t.date || Date.now(), id: `PENDING_${Date.now()}`, status: 'pending' };
 
     if (!navigator.onLine && !forceOnline) {
         await addToQueue('createTransaction', newTx);
-        if (t.type === 'rent' && t.stallNumber) {
-            patchLocalCache<Stall[]>('stalls', (stalls) => {
-                return stalls.map(s => {
-                    if (s.number === t.stallNumber && s.marketId === t.marketId) {
-                        return { ...s, lastPaymentDate: Date.now(), healthStatus: 'healthy' };
-                    }
-                    return s;
-                });
-            });
-        }
-        return;
+        return newTx; // Return optimistic object
     }
     
-    const { error } = await supabase.from('transactions').insert([{
+    const { data, error } = await supabase.from('transactions').insert([{
         market_id: t.marketId, amount: t.amount, type: t.type, provider: t.provider,
-        stall_number: t.stallNumber, reference: t.reference, collected_by: t.collectedBy, status: 'completed',
+        stall_number: t.stallNumber, stall_id: t.stallId, reference: t.reference, collected_by: t.collectedBy, status: 'completed',
         date: new Date(t.date || Date.now()).toISOString()
-    }]);
+    }]).select().single();
+    
     if (error) throw error;
+    return { ...data, date: new Date(data.date).getTime() };
 };
 
 export const createSanction = async (s: any, forceOnline = false) => {
     if (!navigator.onLine && !forceOnline) {
         await addToQueue('createSanction', { ...s, date: Date.now() });
-        if (s.stallId) {
-            patchLocalCache<Stall[]>('stalls', (stalls) => {
-                return stalls.map(st => st.id === s.stallId ? { ...st, healthStatus: 'warning' } : st);
-            });
-        }
-        return;
+        return { ...s, id: `PENDING_${Date.now()}` };
     }
-    const { error } = await supabase.from('transactions').insert([{
+    const { data, error } = await supabase.from('transactions').insert([{
         market_id: s.marketId, amount: s.amount, type: 'fine', provider: 'system',
-        stall_number: s.stallNumber, reference: `SANCTION-${Date.now()}`, collected_by: s.issuedBy,
+        stall_number: s.stallNumber, stall_id: s.stallId, reference: `SANCTION-${Date.now()}`, collected_by: s.issuedBy,
         status: 'completed', date: new Date(s.date || Date.now()).toISOString(), reason: s.reason
-    }]);
+    }]).select().single();
+
     if (error) throw error;
     if (s.stallId) await supabase.from('stalls').update({ health_status: 'warning' }).eq('id', s.stallId);
-};
-
-export const contestSanction = async (sanctionId: string, reason: string, forceOnline = false) => {
-    if (!navigator.onLine && !forceOnline) {
-        await addToQueue('contestSanction', { id: sanctionId, reason });
-        patchLocalCache<any[]>('sanctions', (sanctions) => {
-            return sanctions.map(s => s.id === sanctionId ? { 
-                ...s, 
-                status: 'pending_appeal',
-                appealReason: reason,
-                appealDate: Date.now()
-            } : s);
-        });
-        return;
-    }
-
-    const { error } = await supabase.from('transactions').update({
-        status: 'pending_appeal',
-        appeal_reason: reason,
-        appeal_date: new Date().toISOString()
-    }).eq('id', sanctionId);
-
-    if (error) throw error;
-};
-
-export const resolveSanctionAppeal = async (sanctionId: string, decision: 'accepted' | 'rejected', forceOnline = false) => {
-    if (!navigator.onLine && !forceOnline) {
-        await addToQueue('resolveSanctionAppeal', { id: sanctionId, decision });
-        patchLocalCache<any[]>('sanctions', (sanctions) => {
-            return sanctions.map(s => s.id === sanctionId ? { 
-                ...s, 
-                status: decision === 'accepted' ? 'appeal_accepted' : 'appeal_rejected',
-                amount: decision === 'accepted' ? 0 : s.amount 
-            } : s);
-        });
-        return;
-    }
     
-    const updates = decision === 'accepted' 
-        ? { status: 'appeal_accepted', amount: 0 } 
-        : { status: 'appeal_rejected' };
-
-    const { error } = await supabase.from('transactions').update(updates).eq('id', sanctionId);
-    if (error) throw error;
+    return { ...data, date: new Date(data.date).getTime() };
 };
 
 export const createReport = async (r: any, forceOnline = false) => {
     if (!navigator.onLine && !forceOnline) {
         await addToQueue('createReport', { ...r, timestamp: Date.now() });
-        return;
+        return r;
     }
-    const { error } = await supabase.from('hygiene_reports').insert([{
+    const { data, error } = await supabase.from('hygiene_reports').insert([{
         market_id: r.marketId, category: r.category, description: r.description,
         location: r.location, status: 'pending', is_anonymous: r.isAnonymous, has_audio: r.hasAudio
-    }]);
+    }]).select().single();
     if (error) throw error;
+    return data;
 };
 
 export const createProduct = async (p: any, forceOnline = false) => {
@@ -243,18 +291,24 @@ export const createProduct = async (p: any, forceOnline = false) => {
     const { data, error } = await supabase.from('products').insert([{
         stall_id: p.stallId, name: p.name, price: p.price, stock_quantity: p.stockQuantity, category: p.category, unit: p.unit,
         description: p.description, image_url: p.imageUrl, details: { costPrice: p.costPrice, isVisible: p.isVisible, tags: p.tags }
-    }]).select();
+    }]).select().single();
     if(error) throw error;
-    return { ...p, id: data[0].id };
+    
+    return { 
+        ...data, 
+        stallId: data.stall_id, 
+        stockQuantity: data.stock_quantity,
+        imageUrl: data.image_url,
+        costPrice: data.details?.costPrice,
+        isVisible: data.is_visible,
+        tags: data.details?.tags
+    };
 };
 
 export const updateProduct = async (id: string, updates: any, forceOnline = false) => {
     if (!navigator.onLine && !forceOnline) {
         await addToQueue('updateProduct', { id, updates });
-        patchLocalCache<Product[]>('products', (products) => {
-            return products.map(p => p.id === id ? { ...p, ...updates } : p);
-        });
-        return;
+        return { id, ...updates };
     }
     const payload: any = {};
     if(updates.name) payload.name = updates.name;
@@ -263,139 +317,95 @@ export const updateProduct = async (id: string, updates: any, forceOnline = fals
     if(updates.imageUrl) payload.image_url = updates.imageUrl;
     if(updates.isVisible !== undefined) payload.is_visible = updates.isVisible;
     
-    await supabase.from('products').update(payload).eq('id', id);
-};
-
-export const createOrder = async (order: any, forceOnline = false) => {
-    if (!navigator.onLine && !forceOnline) {
-        await addToQueue('createOrder', order);
-        return;
-    }
-    const { error } = await supabase.rpc('create_order_atomic', {
-        p_stall_id: order.stallId, p_customer_id: order.customerId, p_customer_name: order.customerName,
-        p_customer_phone: order.customerPhone, p_items: order.items, p_total_amount: order.totalAmount,
-        p_payment_provider: order.paymentProvider, p_payment_ref: order.paymentRef
-    });
-    if (error) throw new Error(error.message);
-};
-
-export const updateUserProfile = async (userId: string, updates: Partial<VendorProfile | User>, forceOnline = false) => {
-     if (!navigator.onLine && !forceOnline) {
-         await addToQueue('updateUserProfile', { id: userId, updates });
-         const key = `profile_${userId}`;
-         const cached = localStorage.getItem(key);
-         if (cached) {
-             localStorage.setItem(key, JSON.stringify({ ...JSON.parse(cached), ...updates }));
-         }
-         return;
-     }
-     
-     const payload: any = {};
-     const anyUpdates = updates as any;
-     if (anyUpdates.name) payload.name = anyUpdates.name;
-     if (anyUpdates.phone) payload.phone = anyUpdates.phone;
-     if (anyUpdates.bio) payload.bio = anyUpdates.bio;
-     if (anyUpdates.photoUrl) payload.photo_url = anyUpdates.photoUrl;
-     if (anyUpdates.favorites) payload.favorites = anyUpdates.favorites;
-     if (anyUpdates.preferences) payload.preferences = anyUpdates.preferences;
-     if (anyUpdates.addresses) payload.addresses = anyUpdates.addresses;
-     
-     const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
-     if (error) throw error;
-};
-
-// --- AUTH & ADMIN ---
-
-export const signInUser = async (email: string, pass: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    if (error) throw error; return data;
-};
-export const signOutUser = async () => { await supabase.auth.signOut(); };
-export const signUpUser = async (email: string, password: string, meta: any) => {
-    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: meta.name, role: meta.accountType === 'vendor' ? 'vendor' : 'client' } } });
+    const { data, error } = await supabase.from('products').update(payload).eq('id', id).select().single();
     if (error) throw error;
-    if (data.user) await createProfile({ id: data.user.id, email, name: meta.name, role: meta.accountType === 'vendor' ? 'vendor' : 'client', kycStatus: 'pending', kycDocument: meta.kycDocument, isBanned: false, phone: '', createdAt: Date.now(), passwordHash: '' });
+    return data;
 };
-export const createProfile = async (profile: any) => {
-    const dbProfile = {
-        id: profile.id, email: profile.email, name: profile.name, role: profile.role,
-        kyc_status: profile.kycStatus, kyc_document: profile.kycDocument, is_banned: profile.is_banned,
-        created_at: new Date(profile.createdAt).toISOString(), phone: profile.phone
+
+// MARKET MANAGEMENT
+export const createMarket = async (m: any) => { 
+    const payload = mapMarketToDB(m);
+    const { data, error } = await supabase.from('markets').insert([payload]).select().single(); 
+    if (error) throw error;
+    return mapMarketFromDB(data);
+};
+
+export const updateMarket = async (id: string, m: any) => { 
+    const payload = mapMarketToDB(m);
+    const { data, error } = await supabase.from('markets').update(payload).eq('id', id).select().single();
+    if (error) throw error;
+    return mapMarketFromDB(data);
+};
+
+export const deleteMarket = async (id: string) => { 
+    const { error } = await supabase.from('markets').delete().eq('id', id); 
+    if (error) throw error;
+};
+
+// STALL MANAGEMENT
+export const createStall = async (s: any) => { 
+    const payload = {
+        market_id: s.marketId,
+        number: s.number,
+        zone: s.zone,
+        price: s.price,
+        size: s.size,
+        status: s.status || 'free',
+        product_type: s.productType,
+        health_status: s.healthStatus || 'healthy',
+        compliance_score: s.complianceScore || 100,
+        surface_area: s.surfaceArea,
+        lat: s.coordinates?.lat, // Mapped from coordinates object
+        lng: s.coordinates?.lng, // Mapped from coordinates object
+        details: { 
+            documents: s.documents,
+            activityLog: s.activityLog,
+            employees: s.employees,
+            messages: s.messages
+        }
     };
-    const { error } = await supabase.from('profiles').insert([dbProfile]);
+
+    const { data, error } = await supabase.from('stalls').insert([payload]).select().single(); 
     if (error) throw error;
+    return {
+        ...data,
+        marketId: data.market_id,
+        occupantId: data.occupant_id,
+        surfaceArea: data.surface_area,
+        productType: data.product_type,
+        healthStatus: data.health_status,
+        coordinates: (data.lat && data.lng) ? { lat: data.lat, lng: data.lng } : undefined,
+        documents: data.details?.documents || [],
+        activityLog: data.details?.activityLog || [],
+        employees: data.details?.employees || [],
+        messages: data.details?.messages || []
+    };
 };
-export const resetPasswordForEmail = async (email: string) => { await supabase.auth.resetPasswordForEmail(email); };
-export const updateUserPassword = async (n: string, _o?: string) => { await supabase.auth.updateUser({ password: n }); };
-export const deleteUserAccount = async (_p: string) => { await supabase.rpc('delete_own_account'); await signOutUser(); };
-export const verifyPassword = async (e: string, p: string) => { if (!navigator.onLine) return true; const { error } = await supabase.auth.signInWithPassword({ email: e, password: p }); return !error; };
-export const verifyAgentIdentity = async () => { await new Promise(r => setTimeout(r, 1000)); return true; };
 
-const mapProfile = (p: any): User => ({
-    id: p.id, email: p.email, name: p.name, role: p.role, phone: p.phone,
-    isBanned: p.is_banned, kycStatus: p.kyc_status, kycDocument: p.kyc_document,
-    createdAt: new Date(p.created_at).getTime(), lastSeenAt: p.last_seen_at ? new Date(p.last_seen_at).getTime() : undefined,
-    marketId: p.market_id, stallId: p.stall_id, bio: p.bio, photoUrl: p.avatar_url || p.photo_url,
-    isLogisticsSubscribed: p.is_logistics_subscribed, subscriptionExpiry: p.subscription_expiry ? new Date(p.subscription_expiry).getTime() : undefined,
-    passwordHash: '***', favorites: p.favorites, preferences: p.preferences, addresses: p.addresses, loyaltyPoints: p.loyalty_points
-});
-
-export const checkValueExists = async (column: string, value: string) => {
-    if (!navigator.onLine) return false;
-    const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq(column, value);
-    return (count || 0) > 0;
+export const createExpense = async (e: any) => { 
+    const payload = {
+        market_id: e.marketId,
+        category: e.category,
+        amount: e.amount,
+        description: e.description,
+        date: new Date(e.date).toISOString()
+    };
+    const { data, error } = await supabase.from('expenses').insert([payload]).select().single(); 
+    if (error) throw error;
+    return { ...data, marketId: data.market_id, date: new Date(data.date).getTime() };
 };
-export const logAuditAction = async (actorId: string, action: string, targetId: string, details: any) => {
-    if (!navigator.onLine) return;
-    await supabase.from('audit_logs').insert([{ actor_id: actorId, action, target_id: targetId, new_value: details }]);
-}; 
-export const logUserActivity = async (userId: string, action: string, details: string) => {
-    if (!navigator.onLine) return;
-    await supabase.from('user_activity_logs').insert([{ user_id: userId, action_type: action, details }]);
-}; 
-export const updateUserPresence = async (userId: string, status: string) => {
-    if (!navigator.onLine) return;
-    await supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
-}; 
 
-// UPDATE: Support for Unique Channel ID to prevent collisions
 export const subscribeToTable = (table: string, cb: (payload: any) => void, uniqueChannelId?: string) => {
-    const channelName = uniqueChannelId || `public:${table}`;
+    const channelName = uniqueChannelId || `public:${table}_${Date.now()}`;
     return supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table }, cb)
       .subscribe();
 };
 
-// --- ENTITY CRUD ---
-
-export const createMarket = async (m: any) => { const { data } = await supabase.from('markets').insert([m]).select(); return data; };
-export const updateMarket = async (id: string, m: any) => { await supabase.from('markets').update(m).eq('id', id); };
-export const deleteMarket = async (id: string) => { await supabase.from('markets').delete().eq('id', id); };
-export const createStall = async (s: any) => { await supabase.from('stalls').insert([s]); };
-export const createBulkStalls = async (stalls: any[]) => { await supabase.from('stalls').insert(stalls); };
-export const deleteStall = async (id: string) => { await supabase.from('stalls').delete().eq('id', id); };
-export const createExpense = async (e: any) => { await supabase.from('expenses').insert([{...e, date: new Date(e.date).toISOString()}]); };
-export const deleteExpense = async (id: string) => { await supabase.from('expenses').delete().eq('id', id); };
-export const deleteProduct = async (id: string) => { await supabase.from('products').delete().eq('id', id); };
-export const reserveStall = async (stallId: string, userId: string) => {
-    if (!navigator.onLine) throw new Error("Réservation impossible hors-ligne.");
-    await supabase.from('stalls').update({ status: 'occupied', occupant_id: userId }).eq('id', stallId);
-    await supabase.from('profiles').update({ stall_id: stallId }).eq('id', userId);
-};
-export const adminUpdateUserStatus = async (userId: string, updates: Partial<User>) => {
-     const payload: any = {};
-     if (updates.isBanned !== undefined) payload.is_banned = updates.isBanned;
-     if (updates.role) payload.role = updates.role;
-     if (updates.kycStatus) payload.kyc_status = updates.kycStatus;
-     await supabase.from('profiles').update(payload).eq('id', userId);
-};
-
-// --- DATA FETCHERS ---
-
 export const fetchMarkets = async (): Promise<Market[]> => {
     const { data, error } = await supabase.from('markets').select('*');
     if (error) throw error;
-    return data || [];
+    return (data || []).map(mapMarketFromDB);
 };
 
 export const fetchStalls = async (): Promise<Stall[]> => {
@@ -410,10 +420,11 @@ export const fetchStalls = async (): Promise<Stall[]> => {
         lastPaymentDate: s.last_payment_date ? new Date(s.last_payment_date).getTime() : undefined,
         healthStatus: s.health_status,
         complianceScore: s.compliance_score,
-        activityLog: s.activity_log || [],
-        documents: s.documents || [],
-        employees: s.employees || [],
-        messages: s.messages || [],
+        coordinates: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined,
+        activityLog: s.details?.activityLog || [],
+        documents: s.details?.documents || [],
+        employees: s.details?.employees || [],
+        messages: s.details?.messages || [],
         surfaceArea: s.surface_area
     }));
 };
@@ -443,6 +454,7 @@ export const fetchTransactions = async (page = 1, limit = 50, start?: number, en
     const transactions = (data || []).map((t: any) => ({
         ...t,
         marketId: t.market_id,
+        stallId: t.stall_id,
         stallNumber: t.stall_number,
         collectedBy: t.collected_by,
         date: new Date(t.date).getTime()
@@ -453,10 +465,7 @@ export const fetchTransactions = async (page = 1, limit = 50, start?: number, en
 export const fetchExpenses = async (): Promise<Expense[]> => {
     const { data, error } = await supabase.from('expenses').select('*');
     if (error) {
-        // PGRST205: relation "public.expenses" does not exist
-        // Nous gérons ce cas spécifique pour éviter un écran blanc si la table n'a pas été migrée
         if (error.code === '42P01' || error.code === 'PGRST205' || error.message.includes('expenses')) { 
-            console.warn("[System] Table 'expenses' manquante ou inaccessible - Fonctionnalité Finance désactivée temporairement.");
             return [];
         }
         throw error;
@@ -519,4 +528,113 @@ export const uploadFile = async (file: File, bucket: string): Promise<string> =>
     if (error) throw error;
     const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName);
     return publicUrl;
+};
+
+export const createOrder = async (order: any, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('createOrder', order);
+        return;
+    }
+    const { error } = await supabase.rpc('create_order_atomic', {
+        p_stall_id: order.stallId, p_customer_id: order.customerId, p_customer_name: order.customerName,
+        p_customer_phone: order.customerPhone, p_items: order.items, p_total_amount: order.totalAmount,
+        p_payment_provider: order.paymentProvider, p_payment_ref: order.paymentRef
+    });
+    if (error) throw new Error(error.message);
+};
+
+export const updateOrderStatus = async (orderId: string, status: string) => {
+    await supabase.from('client_orders').update({ status }).eq('id', orderId);
+};
+
+export const deleteProduct = async (id: string) => { await supabase.from('products').delete().eq('id', id); };
+export const deleteStall = async (id: string) => { await supabase.from('stalls').delete().eq('id', id); };
+export const deleteExpense = async (id: string) => { await supabase.from('expenses').delete().eq('id', id); };
+export const createBulkStalls = async (stalls: any[]) => { 
+    // Bulk create helper mapping
+    const mappedStalls = stalls.map(s => ({
+        market_id: s.marketId,
+        number: s.number,
+        zone: s.zone,
+        price: s.price,
+        size: s.size,
+        status: s.status || 'free',
+        product_type: s.productType,
+        health_status: s.healthStatus || 'healthy',
+        compliance_score: s.complianceScore || 100,
+        surface_area: s.surfaceArea,
+        lat: s.coordinates?.lat,
+        lng: s.coordinates?.lng,
+        details: { 
+            documents: s.documents,
+            activityLog: s.activityLog,
+            employees: s.employees,
+            messages: s.messages
+        }
+    }));
+    await supabase.from('stalls').insert(mappedStalls); 
+};
+export const adminUpdateUserStatus = async (userId: string, updates: Partial<User>) => {
+     const payload: any = {};
+     if (updates.isBanned !== undefined) payload.is_banned = updates.isBanned;
+     if (updates.role) payload.role = updates.role;
+     if (updates.kycStatus) payload.kyc_status = updates.kycStatus;
+     await supabase.from('profiles').update(payload).eq('id', userId);
+};
+
+export const contestSanction = async (sanctionId: string, reason: string, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('contestSanction', { id: sanctionId, reason });
+        return;
+    }
+    await supabase.from('transactions').update({
+        status: 'pending_appeal',
+        appeal_reason: reason,
+        appeal_date: new Date().toISOString()
+    }).eq('id', sanctionId);
+};
+
+export const resolveSanctionAppeal = async (sanctionId: string, decision: 'accepted' | 'rejected', forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('resolveSanctionAppeal', { id: sanctionId, decision });
+        return;
+    }
+    const updates = decision === 'accepted' ? { status: 'appeal_accepted', amount: 0 } : { status: 'appeal_rejected' };
+    await supabase.from('transactions').update(updates).eq('id', sanctionId);
+};
+
+export const updateUserProfile = async (userId: string, updates: Partial<VendorProfile | User>, forceOnline = false) => {
+     if (!navigator.onLine && !forceOnline) {
+         await addToQueue('updateUserProfile', { id: userId, updates });
+         return;
+     }
+     const payload: any = {};
+     const anyUpdates = updates as any;
+     if (anyUpdates.name) payload.name = anyUpdates.name;
+     if (anyUpdates.phone) payload.phone = anyUpdates.phone;
+     if (anyUpdates.bio) payload.bio = anyUpdates.bio;
+     if (anyUpdates.photoUrl) payload.photo_url = anyUpdates.photoUrl;
+     if (anyUpdates.favorites) payload.favorites = anyUpdates.favorites;
+     if (anyUpdates.preferences) payload.preferences = anyUpdates.preferences;
+     
+     await supabase.from('profiles').update(payload).eq('id', userId);
+};
+
+export const verifyAgentIdentity = async (): Promise<boolean> => {
+    await new Promise(r => setTimeout(r, 1000));
+    return true; 
+};
+
+export const reserveStall = async (stallId: string, userId: string, provider?: string, isPriority?: boolean, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('reserveStall', { stallId, userId, provider, isPriority });
+        return;
+    }
+    const { error } = await supabase.from('stalls').update({ 
+        status: 'occupied', 
+        occupant_id: userId,
+        is_priority: isPriority,
+        last_payment_date: new Date().toISOString()
+    }).eq('id', stallId);
+    if (error) throw error;
 };

@@ -23,7 +23,9 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  const { isDataLoading, loadData, data, setters } = useAppData(session, currentUser);
+  // Hook Principal : Cerveau de l'application
+  // On récupère loadingStates pour savoir exactement ce qui charge
+  const { isDataLoading, loadingStates, lazyLoaders, data, actions } = useAppData(session, currentUser);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -90,34 +92,6 @@ const App: React.FC = () => {
       logs: []
   } : null;
 
-  // --- ACTIONS HANDLERS ---
-  const handleCreateOrder = async (order: any) => {
-      try { await SupabaseService.createOrder({ ...order, customerId: currentUser?.id }); toast.success("Commande envoyée !"); loadData(); } catch (e: any) { toast.error(e.message); }
-  };
-
-  const handleCollectPayment = async (stallId: string, amount: number) => {
-      try { const stall = data.stalls.find(s => s.id === stallId); await SupabaseService.createTransaction({ marketId: stall?.marketId, stallNumber: stall?.number, amount, type: 'rent', provider: 'cash', collectedBy: currentUser?.id, reference: `CASH-${Date.now()}` }); toast.success("Paiement enregistré !"); loadData(); } catch (e: any) { toast.error(e.message); }
-  };
-
-  const handleIssueSanction = async (stallId: string, type: 'warning'|'fine', reason: string, amount: number) => {
-      try { await SupabaseService.createSanction({ marketId: data.stalls.find(s => s.id === stallId)?.marketId, stallNumber: data.stalls.find(s => s.id === stallId)?.number, stallId, amount, type, reason, issuedBy: currentUser?.id }); toast.success("Sanction émise"); loadData(); } catch (e: any) { toast.error(e.message); }
-  };
-
-  const handleReserveStall = async (stallId: string, provider: string, isPriority: boolean) => {
-      if (!currentUser) return;
-      try { await SupabaseService.reserveStall(stallId, currentUser.id); toast.success("Étal réservé !"); await fetchUserProfile(currentUser.id); loadData(); } catch (e: any) { toast.error(e.message); }
-  };
-
-  const handleContestSanction = async (sanctionId: string, reason: string) => {
-      try { 
-          await SupabaseService.contestSanction(sanctionId, reason); 
-          toast.success("Contestation envoyée au médiateur."); 
-          loadData(); 
-      } catch (e: any) { 
-          toast.error(e.message); 
-      }
-  };
-
   if (isDataLoading && session) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-12 h-12 text-blue-600 animate-spin"/></div>;
   if (!session) return authView === 'login' ? <LoginScreen onLogin={handleLogin} onGoToRegister={() => setAuthView('register')} isLoading={isAuthLoading} onGuestAccess={()=>{}}/> : <RegisterScreen onRegister={handleRegister} onBackToLogin={() => setAuthView('login')} isLoading={isAuthLoading}/>;
   if (!currentUser) return null;
@@ -147,16 +121,22 @@ const App: React.FC = () => {
                     transactions={data.recentTransactions} receipts={data.receipts} agents={data.agents} 
                     expenses={data.expenses} paymentPlans={data.paymentPlans} notifications={data.notifications} 
                     sanctions={data.sanctions} users={data.users} orders={data.orders} 
+                    
+                    // NEW: Pass loading states down
+                    loadingStates={loadingStates}
+                    onLoadFinance={lazyLoaders.loadFinance}
+                    onLoadUsers={lazyLoaders.loadUsers}
+
                     onSendSms={() => {}} onApprovePlan={() => {}} 
-                    onAddMarket={d => SupabaseService.createMarket(d).then(()=>loadData())} 
-                    onUpdateMarket={(id, d) => SupabaseService.updateMarket(id, d).then(()=>loadData())} 
-                    onDeleteMarket={id => SupabaseService.deleteMarket(id).then(()=>loadData())} 
-                    onCreateStall={d => SupabaseService.createStall(d).then(()=>loadData())} 
-                    onBulkCreateStalls={d => SupabaseService.createBulkStalls(d).then(()=>loadData())} 
-                    onDeleteStall={id => SupabaseService.deleteStall(id).then(()=>loadData())} 
-                    onAddExpense={d => SupabaseService.createExpense(d).then(()=>loadData())} 
-                    onDeleteExpense={id => SupabaseService.deleteExpense(id).then(()=>loadData())} 
-                    onUpdateUserStatus={(id, u) => SupabaseService.adminUpdateUserStatus(id, u).then(()=>loadData())} 
+                    onAddMarket={actions.createMarket} 
+                    onUpdateMarket={actions.updateMarket} 
+                    onDeleteMarket={actions.deleteMarket} 
+                    onCreateStall={actions.createStall} 
+                    onBulkCreateStalls={actions.bulkCreateStalls} 
+                    onDeleteStall={actions.deleteStall} 
+                    onAddExpense={actions.createExpense} 
+                    onDeleteExpense={actions.deleteExpense} 
+                    onUpdateUserStatus={actions.updateUserStatus} 
                 />
             )}
 
@@ -166,21 +146,22 @@ const App: React.FC = () => {
                     myStall={data.stalls.find(s => s.occupantId === currentUser.id)} stalls={data.stalls} 
                     myReports={data.reports} sanctions={data.sanctions} products={data.products} orders={data.orders} 
                     notifications={data.notifications} 
-                    onAddProduct={d => SupabaseService.createProduct(d).then(()=>loadData())} 
-                    onUpdateProduct={(id, d) => SupabaseService.updateProduct(id, d).then(()=>loadData())} 
-                    onDeleteProduct={id => SupabaseService.deleteProduct(id).then(()=>loadData())} 
-                    onUpdateOrderStatus={()=>{}} 
+                    
+                    onAddProduct={actions.createProduct} 
+                    onUpdateProduct={actions.updateProduct} 
+                    onDeleteProduct={actions.deleteProduct} 
+                    onUpdateOrderStatus={actions.updateOrderStatus} 
                     onUpdateProfile={u => SupabaseService.updateUserProfile(currentUser.id, u).then(()=>fetchUserProfile(currentUser.id))} 
                     onToggleLogistics={() => Promise.resolve()} 
-                    onReserve={handleReserveStall} 
-                    onContestSanction={handleContestSanction}
+                    onReserve={(id, p, prio) => SupabaseService.reserveStall(id, currentUser.id).then(() => actions.updateMarket(id, {}))} 
+                    onContestSanction={(id, r) => SupabaseService.contestSanction(id, r)}
                 />
             )}
 
             {currentUser.role === 'client' && (
                 <ClientDashboard 
                     stalls={data.stalls} markets={data.markets} products={data.products} orders={data.orders.filter(o => o.customerId === currentUser.id)}
-                    onCreateOrder={handleCreateOrder} 
+                    onCreateOrder={actions.createOrder} 
                 />
             )}
 
@@ -188,7 +169,9 @@ const App: React.FC = () => {
                 <AgentFieldTool 
                     stalls={data.stalls} sanctions={data.sanctions} agentLogs={currentAgent.logs} 
                     cashInHand={currentAgent.cashInHand} isShiftActive={currentAgent.isShiftActive} 
-                    onCollectPayment={handleCollectPayment} onIssueSanction={handleIssueSanction} onShiftAction={()=>{}} 
+                    onCollectPayment={(id, amt) => SupabaseService.createTransaction({ marketId: 'm1', amount: amt, type: 'rent', provider: 'cash', stallId: id, collectedBy: currentUser.id }).then(() => {})} 
+                    onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: 'm1', stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
+                    onShiftAction={()=>{}} 
                 />
             )}
 
@@ -196,7 +179,7 @@ const App: React.FC = () => {
                 <MediatorDashboard 
                     sanctions={data.sanctions} 
                     stalls={data.stalls}
-                    onResolveAppeal={(id, decision) => SupabaseService.resolveSanctionAppeal(id, decision).then(()=>loadData())}
+                    onResolveAppeal={(id, decision) => SupabaseService.resolveSanctionAppeal(id, decision).then(()=> {})}
                 />
             )}
 
