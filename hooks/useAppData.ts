@@ -1,6 +1,6 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, Agent, AppNotification } from '../types';
+import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, Agent, AppNotification, Mission } from '../types';
 import * as SupabaseService from '../services/supabaseService';
 import toast from 'react-hot-toast';
 
@@ -25,7 +25,8 @@ export const useAppData = (session: any, currentUser: User | null) => {
       finance: false,
       users: false,
       products: false,
-      orders: false
+      orders: false,
+      missions: false // Added mission loading state
   });
 
   // --- STATE CORE (Structurel - Chargé au démarrage) ---
@@ -41,12 +42,28 @@ export const useAppData = (session: any, currentUser: User | null) => {
   const [orders, setOrders] = useState<ClientOrder[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sanctions, setSanctions] = useState<Sanction[]>([]);
+  const [missions, setMissions] = useState<Mission[]>([]); // New missions state
   
   // Placeholders
   const [reports] = useState<any[]>([]);
   const [receipts] = useState<any[]>([]);
   const [paymentPlans] = useState<any[]>([]);
-  const [agents] = useState<Agent[]>([]);
+  
+  // Agents are derived from users
+  const agents = users
+    .filter(u => u.role === 'agent')
+    .map(u => ({
+        id: u.id,
+        userId: u.id,
+        name: u.name,
+        marketId: u.marketId || 'm1',
+        role: 'collector' as const, // Default for now
+        performanceScore: u.agentStats?.performanceScore || 85,
+        lastActive: u.lastSeenAt || Date.now(),
+        cashInHand: u.agentStats?.cashInHand || 0,
+        isShiftActive: !!u.agentStats?.isShiftActive,
+        logs: [] // Logs would be fetched separately if needed
+    }));
 
   // --- CACHE MANAGEMENT ---
   // Stores timestamp of last successful fetch for each segment
@@ -134,6 +151,29 @@ export const useAppData = (session: any, currentUser: User | null) => {
       updateUserStatus: async (userId: string, updates: any) => {
           setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...updates } : u));
           await SupabaseService.adminUpdateUserStatus(userId, updates);
+      },
+      // --- NEW AGENT ACTIONS ---
+      assignMission: async (missionData: any) => {
+          try {
+              const newMission = await SupabaseService.createMission(missionData);
+              setMissions(prev => [newMission, ...prev]);
+          } catch (e: any) { throw e; }
+      },
+      updateMissionStatus: async (id: string, status: any, report?: string) => {
+          setMissions(prev => prev.map(m => m.id === id ? { ...m, status, report } : m));
+          try { await SupabaseService.updateMissionStatus(id, status, report); } catch (e) { loadCoreData(); }
+      },
+      validateCashDrop: async (agentId: string, amount: number) => {
+          try {
+              await SupabaseService.validateAgentDeposit(agentId, amount);
+              // Optimistic update of agent cash in users list
+              setUsers(prev => prev.map(u => {
+                  if (u.id === agentId && u.agentStats) {
+                      return { ...u, agentStats: { ...u.agentStats, cashInHand: 0 } };
+                  }
+                  return u;
+              }));
+          } catch (e: any) { toast.error("Erreur validation : " + e.message); }
       }
   };
 
@@ -206,6 +246,20 @@ export const useAppData = (session: any, currentUser: User | null) => {
           } finally {
               setLoadingStates(prev => ({ ...prev, orders: false }));
           }
+      },
+
+      loadMissions: async (forceRefresh = false) => {
+          const now = Date.now();
+          if (!forceRefresh && lastFetchRef.current['missions'] && (now - lastFetchRef.current['missions'] < CACHE_TTL)) return;
+          
+          setLoadingStates(prev => ({ ...prev, missions: true }));
+          try {
+              const m = await fetchSafe(SupabaseService.fetchMissions(), [], 'Missions');
+              setMissions(m);
+              lastFetchRef.current['missions'] = now;
+          } finally {
+              setLoadingStates(prev => ({ ...prev, missions: false }));
+          }
       }
   };
 
@@ -228,6 +282,9 @@ export const useAppData = (session: any, currentUser: User | null) => {
         // Pre-fetch based on role importance
         if (currentUser.role === 'vendor') {
             lazyLoaders.loadProducts(); // Vendor needs products immediately
+        }
+        if (currentUser.role === 'agent') {
+            lazyLoaders.loadMissions(); // Agent needs missions immediately
         }
 
     } catch (error: any) {
@@ -269,13 +326,16 @@ export const useAppData = (session: any, currentUser: User | null) => {
     if (currentUser.role === 'admin') {
         subscribe('transactions', 'finance');
         subscribe('expenses', 'finance');
-        subscribe('profiles', 'users');
+        subscribe('profiles', 'users'); // Will update agent list automatically
+        subscribe('missions', 'missions', () => lazyLoaders.loadMissions(true));
     } else if (currentUser.role === 'vendor') {
         subscribe('products', 'products', () => lazyLoaders.loadProducts(true)); // Auto refresh for own products
         subscribe('client_orders', 'orders', () => {
             toast.success("Mise à jour commande !");
             lazyLoaders.loadOrders(true);
         });
+    } else if (currentUser.role === 'agent') {
+        subscribe('missions', 'missions', () => lazyLoaders.loadMissions(true)); // Agent listens for new missions
     }
 
     return () => {
@@ -292,7 +352,7 @@ export const useAppData = (session: any, currentUser: User | null) => {
     actions,
     data: {
       markets, stalls, products, recentTransactions, financialStats, expenses, orders, users,
-      sanctions, notifications, reports, receipts, paymentPlans, agents 
+      sanctions, notifications, reports, receipts, paymentPlans, agents, missions 
     }
   };
 };

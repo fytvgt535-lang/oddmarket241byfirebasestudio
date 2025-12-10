@@ -45,6 +45,26 @@ export interface UserActivity {
   createdAt: number;
 }
 
+// --- AGENT MISSIONS (REAL DATA STRUCTURE) ---
+export type MissionStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+export type MissionType = 'collection' | 'inspection' | 'verification' | 'security';
+
+export interface Mission {
+  id: string;
+  agentId: string;
+  marketId: string;
+  type: MissionType;
+  title: string;
+  description: string;
+  targetStallId?: string;
+  status: MissionStatus;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  createdAt: number;
+  dueDate?: number;
+  completedAt?: number;
+  report?: string;
+}
+
 // --- SMART SHOPPER (OFFLINE FEATURES) ---
 export interface LocalVendor {
   id: string;
@@ -150,6 +170,14 @@ export interface User {
   loyaltyPoints?: number;
   favorites?: string[];
   preferences?: UserPreferences;
+  
+  // Real Agent Data Storage
+  agentStats?: {
+      cashInHand: number;
+      performanceScore: number;
+      isShiftActive: boolean;
+      lastActive: number;
+  };
 }
 
 export type StallHealth = 'healthy' | 'warning' | 'critical';
@@ -344,16 +372,17 @@ export interface HygieneReport {
   hasAudio?: boolean;
 }
 
-export type PaymentProvider = 'orange' | 'momo' | 'airtel' | 'cash';
+export type PaymentProvider = 'orange' | 'momo' | 'airtel' | 'cash' | 'system';
 
 export interface Transaction {
   id: string;
   marketId: string;
   amount: number;
   date: number;
-  type: 'rent' | 'fine' | 'tax' | 'logistics_sub';
+  type: 'rent' | 'fine' | 'tax' | 'logistics_sub' | 'deposit'; // Includes 'deposit' for agent cash drops
   provider: PaymentProvider;
   stallNumber?: string;
+  stallId?: string;
   reference: string;
   status: 'pending' | 'completed';
   collectedBy?: string;

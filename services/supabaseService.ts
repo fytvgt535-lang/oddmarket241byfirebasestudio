@@ -1,6 +1,6 @@
 
 import { supabase } from '../supabaseClient';
-import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, Expense, Sanction, AppNotification, Agent, AuditLog, AppRole } from '../types';
+import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, Expense, Sanction, AppNotification, Agent, AuditLog, AppRole, Mission } from '../types';
 import { compressImage } from '../utils/imageOptimizer';
 
 // --- CONFIGURATION ---
@@ -54,8 +54,7 @@ export const logSystemAction = async (actorId: string, action: string, targetId:
     const { error } = await supabase.from('audit_logs').insert([payload]);
     
     if (error) {
-        // On ne loggue pas l'erreur en console ici pour éviter le spam si la table manque
-        // Fallback queue si échec critique, l'audit ne doit pas être perdu
+        // Fallback queue si échec critique
         addToQueue('logAuditFallback', payload);
     }
 };
@@ -130,6 +129,9 @@ const executeAction = async (action: string, payload: any) => {
     case 'createOrder': return createOrder(payload, true);
     case 'updateUserProfile': return updateUserProfile(payload.id, payload.updates, true);
     case 'reserveStall': return reserveStall(payload.stallId, payload.userId, undefined, undefined, true);
+    case 'createMission': return createMission(payload, true);
+    case 'updateMissionStatus': return updateMissionStatus(payload.id, payload.status, payload.report, true); // Updated signature
+    case 'validateAgentDeposit': return validateAgentDeposit(payload.agentId, payload.amount, true);
     case 'logAuditFallback': return supabase.from('audit_logs').insert([payload]); // Retry log
     default: throw new Error(`Unknown action: ${action}`);
   }
@@ -192,7 +194,8 @@ const mapProfile = (data: any): User => ({
   shoppingList: data.shopping_list,
   loyaltyPoints: data.loyalty_points,
   favorites: data.favorites,
-  preferences: data.preferences
+  preferences: data.preferences,
+  agentStats: data.agent_stats // Map agent stats from JSONB or column
 });
 
 const mapMarketFromDB = (m: any): Market => ({
@@ -275,7 +278,6 @@ export const resetPasswordForEmail = async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin + '/reset-password',
     });
-    // On ne log pas l'acteur ici car il n'est pas connecté, mais on pourrait loguer la demande système
     if (error) throw error;
 };
 
@@ -409,14 +411,8 @@ export const updateProduct = async (id: string, updates: any, forceOnline = fals
 export const createMarket = async (m: any) => { 
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').insert([payload]).select().single(); 
-    if (error) {
-        console.error("Supabase Create Market Error:", error);
-        // Détection d'erreurs de schéma
-        if (error.code === 'PGRST204' || error.message.includes("Could not find")) {
-             throw new Error(`Colonne manquante dans la DB (Erreur ${error.code}). Veuillez exécuter le script SQL de mise à jour.`);
-        }
-        throw error;
-    }
+    if (error) throw error;
+    
     const { data: { user } } = await supabase.auth.getUser();
     if (user) logSystemAction(user.id, 'CREATE_MARKET', data.id, payload, `Création marché ${m.name}`);
     return mapMarketFromDB(data);
@@ -425,13 +421,8 @@ export const createMarket = async (m: any) => {
 export const updateMarket = async (id: string, m: any) => { 
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').update(payload).eq('id', id).select().single();
-    if (error) {
-         console.error("Supabase Update Market Error:", error);
-         if (error.code === 'PGRST204' || error.message.includes("Could not find")) {
-             throw new Error(`Colonne manquante dans la DB. Veuillez exécuter le script SQL.`);
-        }
-        throw error;
-    }
+    if (error) throw error;
+    
     const { data: { user } } = await supabase.auth.getUser();
     if (user) logSystemAction(user.id, 'UPDATE_MARKET', id, payload, `Mise à jour marché`);
     return mapMarketFromDB(data);
@@ -455,8 +446,8 @@ export const createStall = async (s: any) => {
         status: s.status || 'free',
         product_type: s.product_type,
         health_status: s.healthStatus || 'healthy',
-        compliance_score: s.complianceScore || 100,
-        surface_area: s.surfaceArea,
+        compliance_score: s.compliance_score || 100,
+        surface_area: s.surface_area,
         lat: s.coordinates?.lat, // Mapped from coordinates object
         lng: s.coordinates?.lng, // Mapped from coordinates object
         details: { 
@@ -627,6 +618,116 @@ export const fetchAuditLogs = async (): Promise<AuditLog[]> => {
         createdAt: new Date(l.created_at).getTime(),
         metadata: l.new_value?._meta
     }));
+};
+
+// --- MISSION & AGENT MANAGEMENT (REAL DATA) ---
+
+export const fetchMissions = async (): Promise<Mission[]> => {
+    const { data, error } = await supabase.from('missions').select('*').order('created_at', { ascending: false });
+    if (error) {
+        // Soft fail if table missing
+        if (error.code === '42P01' || error.message.includes('relation "missions" does not exist')) {
+            console.warn("Missions table missing.");
+            return [];
+        }
+        throw error;
+    }
+    return (data || []).map((m: any) => ({
+        ...m,
+        agentId: m.agent_id,
+        marketId: m.market_id,
+        createdAt: new Date(m.created_at).getTime(),
+        dueDate: m.due_date ? new Date(m.due_date).getTime() : undefined,
+        completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
+    }));
+};
+
+export const createMission = async (mission: any, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('createMission', mission);
+        return { ...mission, id: `PENDING_${Date.now()}` };
+    }
+    
+    const payload = {
+        agent_id: mission.agentId,
+        market_id: mission.marketId,
+        type: mission.type,
+        title: mission.title,
+        description: mission.description,
+        priority: mission.priority,
+        status: 'pending'
+    };
+
+    const { data, error } = await supabase.from('missions').insert([payload]).select().single();
+    if (error) throw error;
+    
+    // Log action
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'ASSIGN_MISSION', data.id, payload, `Mission: ${mission.title}`);
+
+    return {
+        ...data,
+        agentId: data.agent_id,
+        marketId: data.market_id,
+        createdAt: new Date(data.created_at).getTime()
+    };
+};
+
+export const updateMissionStatus = async (id: string, status: string, report?: string, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('updateMissionStatus', { id, status, report });
+        return;
+    }
+    
+    const payload: any = { status };
+    if (status === 'completed') {
+        payload.completed_at = new Date().toISOString();
+        if (report) payload.report = report;
+    }
+
+    const { error } = await supabase.from('missions').update(payload).eq('id', id);
+    if (error) throw error;
+};
+
+export const validateAgentDeposit = async (agentId: string, amount: number, forceOnline = false) => {
+    if (!navigator.onLine && !forceOnline) {
+        await addToQueue('validateAgentDeposit', { agentId, amount });
+        return;
+    }
+
+    // 1. Create Transaction 'deposit'
+    const { data: { user } } = await supabase.auth.getUser();
+    const txPayload = {
+        market_id: 'central_treasury', // Or specific market
+        amount: amount,
+        type: 'deposit',
+        provider: 'cash',
+        collected_by: agentId,
+        status: 'completed',
+        reference: `DEPOSIT-${Date.now()}`,
+        date: new Date().toISOString()
+    };
+    
+    const { error: txError } = await supabase.from('transactions').insert([txPayload]);
+    if (txError) throw txError;
+
+    // 2. Update Agent Profile (Reset cash)
+    // We assume agent stats are in 'agent_stats' jsonb column or similar in profiles
+    // For simplicity, we just update the jsonb field.
+    const { error: updateError } = await supabase.rpc('reset_agent_cash', { p_agent_id: agentId });
+    
+    // Fallback if RPC doesn't exist: update profile JSON manually
+    if (updateError) {
+        const { data: profile } = await supabase.from('profiles').select('agent_stats').eq('id', agentId).single();
+        if (profile) {
+            const stats = profile.agent_stats || {};
+            await supabase.from('profiles').update({ 
+                agent_stats: { ...stats, cashInHand: 0 } 
+            }).eq('id', agentId);
+        }
+    }
+
+    if (user) logSystemAction(user.id, 'VALIDATE_DEPOSIT', agentId, { amount }, 'Encaissement Trésorerie');
 };
 
 export const getCurrentUserProfile = async (userId: string): Promise<User | null> => {

@@ -1,22 +1,24 @@
 
 import React, { useState, useMemo } from 'react';
-import { Stall, Sanction, PREDEFINED_INFRACTIONS } from '../../types';
+import { Stall, Sanction, PREDEFINED_INFRACTIONS, Mission } from '../../types';
 import { calculateStallDebt, formatCurrency } from '../../utils/coreUtils';
 import { Button } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
 import { Card } from '../ui/Card';
+import { Target } from 'lucide-react';
 
 interface AgentActionProps {
   stall: Stall;
   mode: 'collect' | 'sanction';
   sanctions: Sanction[];
+  activeMission?: Mission | null; // Added mission context
   onCancel: () => void;
   onPayment: (amount: number) => void;
   onSanction: (infractionId: string) => void;
   isProcessing: boolean;
 }
 
-const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, onCancel, onPayment, onSanction, isProcessing }) => {
+const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, activeMission, onCancel, onPayment, onSanction, isProcessing }) => {
   const [amount, setAmount] = useState<number>(stall.price);
   const [infractionId, setInfractionId] = useState('');
 
@@ -24,6 +26,14 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, onCan
 
   return (
     <Card className="animate-fade-in shadow-xl border-t-4 border-t-current" style={{ color: mode === 'collect' ? '#2563EB' : '#DC2626' }}>
+        {activeMission && (
+            <div className="bg-yellow-50 p-2 text-center border-b border-yellow-200">
+                <span className="text-xs font-bold text-yellow-800 flex items-center justify-center gap-2">
+                    <Target className="w-3 h-3"/> MISSION EN COURS : {activeMission.title}
+                </span>
+            </div>
+        )}
+        
         <div className={`p-6 border-b border-gray-100 ${mode === 'collect' ? 'bg-blue-50' : 'bg-red-50'}`}>
             <div className="flex justify-between items-start">
                 <div>

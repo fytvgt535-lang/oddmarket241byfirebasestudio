@@ -1,14 +1,14 @@
 
 import React from 'react';
 
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   noPadding?: boolean;
   variant?: 'default' | 'gradient' | 'outlined' | 'flat';
 }
 
-export const Card: React.FC<CardProps> = ({ children, className = '', noPadding = false, variant = 'default' }) => {
+export const Card: React.FC<CardProps> = ({ children, className = '', noPadding = false, variant = 'default', ...props }) => {
   const baseStyles = "rounded-2xl overflow-hidden shadow-sm transition-all";
   
   const variants = {
@@ -19,7 +19,7 @@ export const Card: React.FC<CardProps> = ({ children, className = '', noPadding 
   };
 
   return (
-    <div className={`${baseStyles} ${variants[variant]} ${className}`}>
+    <div className={`${baseStyles} ${variants[variant]} ${className}`} {...props}>
       {noPadding ? children : <div className="p-6">{children}</div>}
     </div>
   );

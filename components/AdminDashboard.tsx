@@ -1,12 +1,13 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard } from 'lucide-react';
-import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder } from '../types';
+import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard, Radio } from 'lucide-react';
+import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder, Mission } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
 import FinanceManager from './admin/FinanceManager';
 import UserManager from './admin/UserManager';
 import AuditLogViewer from './admin/AuditLogViewer';
+import AgentManager from './admin/AgentManager';
 import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { t } from '../services/translations';
 import { simulateGlobalLocation } from '../utils/coreUtils';
@@ -24,10 +25,12 @@ interface AdminDashboardProps {
   sanctions?: Sanction[];
   users?: User[];
   orders?: ClientOrder[];
+  missions?: Mission[];
   
-  loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean };
+  loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean; missions?: boolean };
   onLoadFinance?: () => void;
   onLoadUsers?: () => void;
+  onLoadMissions?: () => void;
   
   onSendSms: (marketId: string, audience: any, message: string, tone: any) => void;
   onApprovePlan: (planId: string) => void;
@@ -42,25 +45,31 @@ interface AdminDashboardProps {
   onDeleteExpense?: (expenseId: string) => void;
   onBulkCreateStalls?: (stalls: Omit<Stall, 'id'>[]) => void;
   
+  // Agent Actions
+  onAssignMission?: (mission: any) => void;
+  onValidateCashDrop?: (agentId: string, amount: number) => void;
+  
   // New: Current Language
   currentLanguage: string;
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-    markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [],
-    loadingStates, onLoadFinance, onLoadUsers,
+    markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], agents = [], missions = [],
+    loadingStates, onLoadFinance, onLoadUsers, onLoadMissions,
     onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls,
+    onAssignMission, onValidateCashDrop,
     currentLanguage
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'markets' | 'users' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'markets' | 'users' | 'agents' | 'audit'>('overview');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('all');
   const [showNotifications, setShowNotifications] = useState(false);
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
       if (activeTab === 'finance' || activeTab === 'overview') onLoadFinance && onLoadFinance();
-      if (activeTab === 'users' || activeTab === 'audit') onLoadUsers && onLoadUsers();
-  }, [activeTab, onLoadFinance, onLoadUsers]);
+      if (activeTab === 'users' || activeTab === 'audit' || activeTab === 'agents') onLoadUsers && onLoadUsers();
+      if (activeTab === 'agents') onLoadMissions && onLoadMissions(); // Fetch missions when active
+  }, [activeTab, onLoadFinance, onLoadUsers, onLoadMissions]);
 
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
   const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
@@ -121,6 +130,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       <div className="border-b border-gray-200 overflow-x-auto">
         <nav className="-mb-px flex gap-6 min-w-max">
           <button onClick={() => setActiveTab('overview')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'}`}><Activity className="w-4 h-4" /> {t(currentLanguage, 'tab_overview')}</button>
+          
+          <button onClick={() => setActiveTab('agents')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'agents' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'}`}>
+              <Radio className="w-4 h-4" /> {t(currentLanguage, 'tab_agents')}
+          </button>
+
           <button onClick={() => setActiveTab('users')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'users' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'}`}>
               <Users className="w-4 h-4" /> {t(currentLanguage, 'tab_users')}
               {loadingStates?.users && <Loader2 className="w-3 h-3 animate-spin"/>}
@@ -228,14 +242,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* Other Tabs */}
+      {activeTab === 'agents' && (
+          <AgentManager 
+            agents={agents}
+            markets={markets}
+            stalls={stalls}
+            missions={missions}
+            onAssignMission={onAssignMission!} 
+            onValidateCashDrop={onValidateCashDrop!}
+            currentLanguage={currentLanguage}
+          />
+      )}
+
       {activeTab === 'markets' && (
           <MarketManager 
             markets={markets} 
+            stalls={stalls}
+            transactions={transactions}
+            sanctions={sanctions}
+            reports={reports}
             onAddMarket={onAddMarket} 
             onUpdateMarket={onUpdateMarket} 
             onDeleteMarket={onDeleteMarket}
             viewMode={marketViewMode}
             setViewMode={setMarketViewMode}
+            currentLanguage={currentLanguage}
           />
       )}
 
@@ -245,7 +276,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             markets={markets} 
             onCreateStall={onCreateStall!} 
             onBulkCreateStalls={onBulkCreateStalls!} 
-            onDeleteStall={onDeleteStall!} 
+            onDeleteStall={onDeleteStall!}
+            currentLanguage={currentLanguage}
           />
       )}
 
@@ -255,7 +287,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             expenses={expenses} 
             loading={loadingStates?.finance}
             onAddExpense={onAddExpense!} 
-            onDeleteExpense={onDeleteExpense!} 
+            onDeleteExpense={onDeleteExpense!}
+            currentLanguage={currentLanguage}
           />
       )}
 

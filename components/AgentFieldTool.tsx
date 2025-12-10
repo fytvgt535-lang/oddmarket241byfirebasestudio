@@ -1,32 +1,65 @@
 
 import React, { useState } from 'react';
-import { UserCheck, RefreshCw, LogOut, CheckCircle } from 'lucide-react';
-import { Stall, Sanction, AgentLog } from '../types';
+import { UserCheck, RefreshCw, LogOut, CheckCircle, ListChecks, Target, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Stall, Sanction, AgentLog, Mission } from '../types';
 import { Button } from './ui/Button';
 import AgentScanner from './agent/AgentScanner';
 import AgentAction from './agent/AgentAction';
 import AgentHistory from './agent/AgentHistory';
 import { Card } from './ui/Card';
+import { Badge } from './ui/Badge';
+import { formatCurrency } from '../utils/coreUtils';
+import toast from 'react-hot-toast';
 
 interface AgentFieldToolProps {
   stalls: Stall[];
   sanctions: Sanction[];
   agentLogs: AgentLog[];
+  missions?: Mission[]; // Added Missions Prop
   cashInHand: number;
   isShiftActive: boolean;
   onCollectPayment: (stallId: string, amount: number, gpsCoordinates: string) => Promise<void> | void;
   onIssueSanction: (stallId: string, type: 'warning' | 'fine', reason: string, amount: number, evidenceUrl?: string) => Promise<void> | void;
   onShiftAction: (action: 'start' | 'end' | 'deposit') => void;
+  onUpdateMissionStatus?: (id: string, status: string, report?: string) => void;
 }
 
-const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agentLogs, cashInHand, isShiftActive, onCollectPayment, onIssueSanction, onShiftAction }) => {
-  const [view, setView] = useState<'scan' | 'action' | 'success'>('scan');
+const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agentLogs, missions = [], cashInHand, isShiftActive, onCollectPayment, onIssueSanction, onShiftAction, onUpdateMissionStatus }) => {
+  const [view, setView] = useState<'scan' | 'missions' | 'action' | 'success'>('missions'); // Default to missions if any
   const [mode, setMode] = useState<'collect' | 'sanction'>('collect');
   const [scannedStall, setScannedStall] = useState<Stall | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastAction, setLastAction] = useState({ title: '', amount: 0 });
+  
+  // MISSION CONTEXT (Workflow Locking)
+  const [activeMission, setActiveMission] = useState<Mission | null>(null);
+
+  const activeMissions = missions.filter(m => m.status === 'pending' || m.status === 'in_progress');
+
+  const startMission = (mission: Mission) => {
+      setActiveMission(mission);
+      // Pre-configure mode based on mission type
+      if (mission.type === 'collection') setMode('collect');
+      else setMode('sanction'); // inspection/verification/security
+      
+      setView('scan');
+      toast("Mission Active : Scannez la cible", { icon: '🎯' });
+  };
 
   const handleScanComplete = (stall: Stall) => {
+      // Mission Validation Logic
+      if (activeMission) {
+          // If mission has a specific target (usually implicit in description or could be explicit field)
+          // Here we do a fuzzy check on description for demo purposes or check if mission is bound to market/zone
+          // Ideally, mission would have targetStallId. Assuming implicit for now or loose coupling.
+          
+          // If targetStallId existed:
+          if (activeMission.targetStallId && activeMission.targetStallId !== stall.id) {
+              toast.error("Étal incorrect pour cette mission !");
+              return;
+          }
+      }
+      
       setScannedStall(stall);
       setView('action');
   };
@@ -36,6 +69,12 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       setIsProcessing(true);
       try {
           await onCollectPayment(scannedStall.id, amount, "0.0,0.0");
+          
+          if (activeMission && onUpdateMissionStatus) {
+              onUpdateMissionStatus(activeMission.id, 'completed', `Paiement de ${formatCurrency(amount)} perçu.`);
+              setActiveMission(null); // Clear context
+          }
+          
           setLastAction({ title: 'Paiement Reçu', amount });
           setView('success');
       } catch(e) {
@@ -49,20 +88,32 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       if (!scannedStall) return;
       setIsProcessing(true);
       try {
-          const fineAmount = 5000; // In real app, derived from infraction ID
+          const fineAmount = 5000; 
           await onIssueSanction(scannedStall.id, 'fine', `Infraction ${infractionId}`, fineAmount); 
+          
+          if (activeMission && onUpdateMissionStatus) {
+              onUpdateMissionStatus(activeMission.id, 'completed', `Sanction émise: ${infractionId}`);
+              setActiveMission(null);
+          }
+
           setLastAction({ title: 'Sanction Émise', amount: fineAmount });
           setView('success');
       } catch(e) {
-          // Error handling done by toaster in parent
+          // Error handling
       } finally {
           setIsProcessing(false);
       }
   };
 
+  const handleAbortMission = () => {
+      setActiveMission(null);
+      setView('missions');
+      setScannedStall(null);
+  };
+
   const resetFlow = () => {
       setScannedStall(null);
-      setView('scan');
+      setView(activeMission ? 'scan' : 'missions');
   };
 
   if (!isShiftActive) {
@@ -83,24 +134,76 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
   }
 
   return (
-    <div className="max-w-md mx-auto bg-gray-50 min-h-screen pb-20 flex flex-col">
+    <div className="max-w-md mx-auto bg-gray-50 min-h-screen pb-24 flex flex-col">
       {/* Header */}
-      <div className={`p-6 sticky top-0 z-20 flex justify-between items-center text-white shadow-lg transition-colors ${mode === 'collect' ? 'bg-blue-900' : 'bg-red-900'}`}>
+      <div className={`p-6 sticky top-0 z-20 flex justify-between items-center text-white shadow-lg transition-colors ${activeMission ? 'bg-orange-600' : mode === 'collect' ? 'bg-blue-900' : 'bg-red-900'}`}>
         <div>
-            <h2 className="font-black text-lg flex gap-2 items-center"><UserCheck className="w-5 h-5"/> TERMINAL AGENT</h2>
-            <p className="text-xs opacity-70 font-mono">CAISSE: {cashInHand.toLocaleString()} F</p>
+            {activeMission ? (
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Target className="w-4 h-4 animate-pulse"/> 
+                        <span className="text-xs font-bold uppercase tracking-widest">Mission En Cours</span>
+                    </div>
+                    <h2 className="font-bold text-lg leading-tight">{activeMission.title}</h2>
+                </div>
+            ) : (
+                <div>
+                    <h2 className="font-black text-lg flex gap-2 items-center"><UserCheck className="w-5 h-5"/> TERMINAL AGENT</h2>
+                    <p className="text-xs opacity-70 font-mono">CAISSE: {cashInHand.toLocaleString()} F</p>
+                </div>
+            )}
         </div>
-        {view === 'scan' && (
-            <div className="flex bg-black/30 rounded-lg p-1 backdrop-blur-sm">
-                <button onClick={() => setMode('collect')} className={`px-3 py-1.5 text-xs rounded-md transition-all ${mode === 'collect' ? 'bg-white text-blue-900 font-bold shadow-sm' : 'text-white/70 font-medium'}`}>Collecte</button>
-                <button onClick={() => setMode('sanction')} className={`px-3 py-1.5 text-xs rounded-md transition-all ${mode === 'sanction' ? 'bg-white text-red-900 font-bold shadow-sm' : 'text-white/70 font-medium'}`}>Sanction</button>
-            </div>
-        )}
       </div>
 
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 overflow-y-auto">
+        
+        {/* VIEW: MISSIONS LIST */}
+        {view === 'missions' && (
+            <div className="space-y-4">
+                <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                    <ListChecks className="w-5 h-5"/> Mes Missions ({activeMissions.length})
+                </h3>
+                
+                {activeMissions.length === 0 ? (
+                    <div className="p-8 text-center border-2 border-dashed border-gray-300 rounded-xl">
+                        <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-2"/>
+                        <p className="text-gray-500">Aucune mission en cours.</p>
+                        <Button variant="outline" onClick={() => setView('scan')} className="mt-4">Scanner un Étal</Button>
+                    </div>
+                ) : (
+                    activeMissions.map(m => (
+                        <Card key={m.id} className="border-l-4 border-l-blue-500">
+                            <div className="p-4">
+                                <div className="flex justify-between items-start mb-2">
+                                    <Badge variant={m.priority === 'urgent' ? 'danger' : 'info'}>{m.priority.toUpperCase()}</Badge>
+                                    <span className="text-xs text-gray-400">{new Date(m.createdAt).toLocaleTimeString()}</span>
+                                </div>
+                                <h4 className="font-bold text-gray-900">{m.title}</h4>
+                                <p className="text-sm text-gray-600 mb-4">{m.description}</p>
+                                <Button size="sm" variant="primary" className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => startMission(m)}>
+                                    Intervenir
+                                </Button>
+                            </div>
+                        </Card>
+                    ))
+                )}
+            </div>
+        )}
+
+        {/* VIEW: SCANNER */}
         {view === 'scan' && (
             <>
+                <div className="flex justify-between items-center mb-4">
+                    {activeMission && (
+                        <button onClick={handleAbortMission} className="text-xs font-bold text-gray-500 flex items-center gap-1 hover:text-red-500">
+                            <ArrowLeft className="w-3 h-3"/> Abandonner Mission
+                        </button>
+                    )}
+                    <div className="flex bg-gray-200 rounded-lg p-1 ml-auto">
+                        <button onClick={() => setMode('collect')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${mode === 'collect' ? 'bg-white shadow text-blue-900' : 'text-gray-500'}`}>Collecte</button>
+                        <button onClick={() => setMode('sanction')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${mode === 'sanction' ? 'bg-white shadow text-red-900' : 'text-gray-500'}`}>Sanction</button>
+                    </div>
+                </div>
                 <AgentScanner stalls={stalls} mode={mode} onScanComplete={handleScanComplete} />
                 <div className="mt-8">
                     <AgentHistory logs={agentLogs} />
@@ -108,11 +211,13 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
             </>
         )}
 
+        {/* VIEW: ACTION FORM */}
         {view === 'action' && scannedStall && (
             <AgentAction 
                 stall={scannedStall} 
                 mode={mode} 
                 sanctions={sanctions} 
+                activeMission={activeMission}
                 onCancel={resetFlow} 
                 onPayment={handlePayment} 
                 onSanction={handleSanction}
@@ -120,6 +225,7 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
             />
         )}
 
+        {/* VIEW: SUCCESS */}
         {view === 'success' && (
             <Card className="p-8 text-center animate-fade-in bg-white border-2 border-green-500 shadow-2xl mt-10">
                 <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600 animate-bounce">
@@ -128,20 +234,27 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
                 <h3 className="font-black text-2xl text-gray-900 mb-2">{lastAction.title}</h3>
                 <p className="text-3xl font-black text-green-600 mb-8">{lastAction.amount.toLocaleString()} F</p>
                 <Button onClick={resetFlow} className="w-full py-4 bg-gray-900 text-white hover:bg-black">
-                    Nouvelle Action
+                    {activeMission ? "Mission Suivante" : "Nouvelle Action"}
                 </Button>
             </Card>
         )}
       </div>
 
-      {/* Footer Actions */}
-      {view === 'scan' && (
-          <div className="p-4 sticky bottom-0 bg-white border-t border-gray-200">
-              <Button variant="outline" onClick={() => onShiftAction('end')} className="w-full text-red-600 border-red-100 hover:bg-red-50">
-                  <LogOut className="w-4 h-4"/> Fin de Service
-              </Button>
-          </div>
-      )}
+      {/* Bottom Navigation */}
+      <div className="bg-white border-t border-gray-200 p-2 flex justify-around items-center fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30">
+          <button onClick={() => { setActiveMission(null); setView('missions'); }} className={`flex flex-col items-center p-2 rounded-lg ${view === 'missions' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}>
+              <ListChecks className="w-6 h-6"/>
+              <span className="text-[10px] font-bold">Missions</span>
+          </button>
+          <button onClick={() => { setActiveMission(null); setView('scan'); }} className={`flex flex-col items-center p-2 rounded-lg ${view === 'scan' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}>
+              <Target className="w-6 h-6"/>
+              <span className="text-[10px] font-bold">Scanner</span>
+          </button>
+          <button onClick={() => onShiftAction('end')} className="flex flex-col items-center p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50">
+              <LogOut className="w-6 h-6"/>
+              <span className="text-[10px] font-bold">Quitter</span>
+          </button>
+      </div>
     </div>
   );
 };

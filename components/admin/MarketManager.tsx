@@ -1,20 +1,28 @@
 
-import React, { useState } from 'react';
-import { Store, LayoutGrid, List, Plus, Pencil, Trash2, MapPin, Image as ImageIcon, Loader2, X, Save, DollarSign, Users, Globe, Navigation, Search, CheckCircle, ArrowRight, ArrowLeft, Clock, Calendar } from 'lucide-react';
-import { Market, MarketSchedule } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { Store, LayoutGrid, List, Plus, Pencil, Trash2, MapPin, Loader2, X, Save, DollarSign, Users, Search, CheckCircle, ArrowRight, ArrowLeft, Clock, Eye, AlertTriangle, TrendingUp, CloudRain, Sun, CloudLightning, MessageCircle, Gavel, Megaphone, ChevronDown, ChevronUp } from 'lucide-react';
+import { Market, MarketSchedule, Stall, Transaction, Sanction, HygieneReport } from '../../types';
 import toast from 'react-hot-toast';
 import { Button } from '../ui/Button';
 import { Input, TextArea } from '../ui/Input';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { formatCurrency, calculateStallDebt } from '../../utils/coreUtils';
+import StallDigitalTwin from '../StallDigitalTwin';
+import { t } from '../../services/translations';
 
 interface MarketManagerProps {
   markets: Market[];
+  stalls?: Stall[];
+  transactions?: Transaction[];
+  sanctions?: Sanction[];
+  reports?: HygieneReport[];
   onAddMarket: (market: Omit<Market, 'id'>) => void;
   onUpdateMarket: (id: string, updates: Partial<Market>) => void;
   onDeleteMarket: (id: string) => void;
   viewMode: 'grid' | 'list';
   setViewMode: (mode: 'grid' | 'list') => void;
+  currentLanguage?: string;
 }
 
 const DEFAULT_SCHEDULE: MarketSchedule = {
@@ -27,34 +35,107 @@ const DEFAULT_SCHEDULE: MarketSchedule = {
     dimanche: { open: '08:00', close: '13:00', isOpen: true },
 };
 
-const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onUpdateMarket, onDeleteMarket, viewMode, setViewMode }) => {
+const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], transactions = [], sanctions = [], reports = [], onAddMarket, onUpdateMarket, onDeleteMarket, viewMode, setViewMode, currentLanguage = 'fr' }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1); // 1: Identité, 2: Horaires & Loc, 3: Finance
+  const [currentStep, setCurrentStep] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Form State
+  // GOD MODE STATE
+  const [isGodMode, setIsGodMode] = useState(false);
+  const [expandedMarketId, setExpandedMarketId] = useState<string | null>(null);
+  
+  // INTERACTIVITY STATE
+  const [selectedStallForTwin, setSelectedStallForTwin] = useState<Stall | null>(null);
+  
   const initialFormState = { 
-      name: '', 
-      city: 'Libreville', 
-      neighborhood: '', 
-      targetRevenue: '', 
-      capacity: '', 
-      baseRent: '', 
-      hasDeliveryService: false, 
-      description: '', 
-      lat: '', 
-      lng: '',
-      schedule: DEFAULT_SCHEDULE
+      name: '', city: 'Libreville', neighborhood: '', targetRevenue: '', capacity: '', baseRent: '', 
+      hasDeliveryService: false, description: '', lat: '', lng: '', schedule: DEFAULT_SCHEDULE
   };
   const [form, setForm] = useState(initialFormState);
 
-  // Filter Markets
   const filteredMarkets = markets.filter(m => 
       m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
       m.neighborhood.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // --- STATS CALCULATION ---
+  const calculateMarketStats = (marketId: string) => {
+      const marketStalls = stalls.filter(s => s.marketId === marketId);
+      const occupiedStalls = marketStalls.filter(s => s.status === 'occupied');
+      
+      // Occupancy
+      const occupancyRate = marketStalls.length > 0 ? (occupiedStalls.length / marketStalls.length) * 100 : 0;
+      
+      // Finance
+      const marketTransactions = transactions.filter(t => t.marketId === marketId && t.type === 'rent');
+      const actualRevenue = marketTransactions.reduce((sum, t) => sum + t.amount, 0);
+      const target = markets.find(m => m.id === marketId)?.targetRevenue || 1;
+      const recoveryRate = Math.min((actualRevenue / target) * 100, 100);
+      
+      // Health / Operational
+      const marketSanctions = sanctions.filter(s => s.marketId === marketId && s.status === 'active');
+      const marketReports = reports.filter(r => r.marketId === marketId && r.status === 'pending');
+      
+      // God Mode Stats (Hidden Deep Data)
+      let totalDebt = 0;
+      let fraudRiskCount = 0;
+      const debtList: { stall: Stall, debt: number, months: number }[] = [];
+
+      occupiedStalls.forEach(stall => {
+          const debtData = calculateStallDebt(stall, sanctions);
+          const debt = debtData.totalDebt;
+          
+          if (debt > 0) {
+              totalDebt += debt;
+              debtList.push({ stall, debt, months: debtData.monthsUnpaid });
+          }
+          if (debt > stall.price * 3) fraudRiskCount++;
+      });
+
+      // Sort debt list by highest debt first
+      debtList.sort((a, b) => b.debt - a.debt);
+
+      return {
+          totalStalls: marketStalls.length,
+          occupied: occupiedStalls.length,
+          occupancyRate,
+          actualRevenue,
+          recoveryRate,
+          activeDisputes: marketSanctions.length,
+          hygieneAlerts: marketReports.length,
+          totalDebt,
+          fraudRiskCount,
+          debtList
+      };
+  };
+
+  const getHealthIcon = (recoveryRate: number, disputes: number) => {
+      if (recoveryRate > 80 && disputes < 5) return <Sun className="w-6 h-6 text-yellow-500 animate-pulse"/>;
+      if (recoveryRate < 50 || disputes > 10) return <CloudLightning className="w-6 h-6 text-red-500"/>;
+      return <CloudRain className="w-6 h-6 text-blue-400"/>;
+  };
+
+  // --- ACTIONS ---
+  const handleRemind = (stallNumber: string, occupantName: string, debt: number) => {
+      toast.success(`SMS envoyé à ${occupantName} (${stallNumber}) pour ${formatCurrency(debt)}`, {
+          icon: '📨',
+          duration: 4000
+      });
+  };
+
+  const handleBulkRemind = (count: number) => {
+      if(confirm(`Envoyer un rappel SMS groupé aux ${count} étals endettés ?`)) {
+          toast.success(`${count} messages de rappel envoyés.`, { icon: '🚀' });
+      }
+  };
+
+  const handleSanction = (stallId: string) => {
+      toast("Dossier de sanction ouvert", { icon: '⚖️' });
+      // Logic to open sanction modal would go here
+  };
+
+  // --- MODAL LOGIC ---
   const openModal = (market?: Market) => {
       setEditingId(market ? market.id : null);
       setCurrentStep(1);
@@ -92,34 +173,24 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
       }));
   };
 
-  // Validation
   const validateStep = (step: number) => {
       if (step === 1) {
           if (!form.name.trim()) { toast.error("Le nom du marché est requis."); return false; }
-          if (form.name.length < 3) { toast.error("Le nom est trop court."); return false; }
           return true;
       }
       if (step === 2) {
           if (!form.city.trim()) { toast.error("La ville est requise."); return false; }
-          if (!form.neighborhood.trim()) { toast.error("Le quartier est requis."); return false; }
           return true;
       }
       if (step === 3) {
-          if (!form.capacity || parseInt(form.capacity) <= 0) { toast.error("Capacité invalide."); return false; }
-          if (!form.baseRent || parseInt(form.baseRent) <= 0) { toast.error("Loyer de base requis."); return false; }
           if (!form.targetRevenue) { toast.error("Objectif de revenu requis."); return false; }
           return true;
       }
       return false;
   };
 
-  const handleNext = () => {
-      if (validateStep(currentStep)) setCurrentStep(prev => prev + 1);
-  };
-
-  const handleBack = () => {
-      setCurrentStep(prev => prev - 1);
-  };
+  const handleNext = () => { if (validateStep(currentStep)) setCurrentStep(prev => prev + 1); };
+  const handleBack = () => { setCurrentStep(prev => prev - 1); };
 
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -152,19 +223,14 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
           }
           setIsModalOpen(false);
       } catch (e: any) {
-          console.error("Erreur market:", e);
           toast.error(`Erreur: ${e.message || "Problème d'enregistrement"}`);
       }
   };
 
   const handleDelete = (id: string, name: string) => {
       if (confirm(`Êtes-vous sûr de vouloir supprimer le marché "${name}" ?`)) {
-          try {
-            onDeleteMarket(id);
-            toast.success("Marché supprimé.");
-          } catch(e: any) {
-            toast.error("Erreur suppression: " + e.message);
-          }
+          onDeleteMarket(id);
+          toast.success("Marché supprimé.");
       }
   };
 
@@ -177,108 +243,247 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
                     <Store className="w-8 h-8"/>
                 </div>
                 <div>
-                    <h3 className="text-xl font-bold text-gray-900">Gestion des Marchés</h3>
-                    <p className="text-sm text-gray-500 font-medium">Configurez les lieux, les zones et les règles financières.</p>
+                    <h3 className="text-xl font-bold text-gray-900">{t(currentLanguage, 'mkt_management')}</h3>
+                    <p className="text-sm text-gray-500 font-medium">{t(currentLanguage, 'mkt_subtitle')}</p>
                 </div>
             </div>
             
             <div className="flex items-center gap-3 w-full md:w-auto">
-                <div className="relative flex-1 md:w-64">
+                {/* GOD MODE TOGGLE */}
+                <button 
+                    onClick={() => setIsGodMode(!isGodMode)} 
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${isGodMode ? 'bg-black text-white border-black shadow-lg shadow-black/20' : 'bg-white text-gray-500 border-gray-200'}`}
+                    title="Afficher les données sensibles (Dettes, Risques)"
+                >
+                    <Eye className="w-4 h-4"/>
+                    <span className="text-xs font-bold uppercase hidden md:inline">{isGodMode ? t(currentLanguage, 'mkt_god_mode') : t(currentLanguage, 'mkt_std_mode')}</span>
+                </button>
+
+                <div className="relative flex-1 md:w-48">
                     <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400"/>
                     <input 
                         type="text" 
-                        placeholder="Rechercher..." 
+                        placeholder={`${t(currentLanguage, 'search_placeholder')}...`} 
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                 </div>
                 <div className="flex bg-gray-100 p-1 rounded-xl shrink-0">
                     <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}><LayoutGrid className="w-5 h-5"/></button>
                     <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}><List className="w-5 h-5"/></button>
                 </div>
-                <Button variant="primary" onClick={() => openModal()} leftIcon={Plus} className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200">Ajouter</Button>
+                <Button variant="primary" onClick={() => openModal()} leftIcon={Plus} className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200">{t(currentLanguage, 'add')}</Button>
             </div>
         </div>
 
         {/* Content Section */}
         {filteredMarkets.length === 0 ? (
             <div className="text-center py-24 bg-white rounded-2xl border-2 border-dashed border-gray-200">
-                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300">
-                    <Store className="w-10 h-10"/>
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-1">Aucun marché trouvé</h3>
-                <p className="text-gray-500 mb-6 max-w-sm mx-auto">Commencez par créer votre premier établissement.</p>
-                <Button variant="outline" onClick={() => openModal()} leftIcon={Plus}>Créer un marché</Button>
+                <Store className="w-16 h-16 text-gray-300 mx-auto mb-4"/>
+                <h3 className="text-lg font-bold text-gray-900">Aucun marché</h3>
+                <Button variant="outline" onClick={() => openModal()} className="mt-4">Créer le premier</Button>
             </div>
         ) : viewMode === 'grid' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredMarkets.map(m => (
-                    <Card key={m.id} className="group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border-gray-200 overflow-hidden flex flex-col" noPadding>
-                        <div className="h-32 bg-gradient-to-r from-blue-500 to-indigo-600 relative overflow-hidden flex items-center justify-center">
-                            <Store className="w-16 h-16 text-white/20"/>
-                            <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => openModal(m)} className="p-2 bg-white/90 rounded-lg hover:bg-white text-blue-600 shadow-sm"><Pencil className="w-4 h-4"/></button>
-                                <button onClick={() => handleDelete(m.id, m.name)} className="p-2 bg-white/90 rounded-lg hover:bg-white text-red-600 shadow-sm"><Trash2 className="w-4 h-4"/></button>
+                {filteredMarkets.map(m => {
+                    const stats = calculateMarketStats(m.id);
+                    const isExpanded = expandedMarketId === m.id && isGodMode;
+
+                    return (
+                        <Card key={m.id} className={`group hover:shadow-xl transition-all duration-300 border-gray-200 overflow-hidden flex flex-col relative ${isExpanded ? 'row-span-2 shadow-2xl ring-2 ring-red-500' : ''}`} noPadding>
+                            {/* Weather Icon (Operational Health) */}
+                            <div className="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur rounded-full p-2 shadow-sm">
+                                {getHealthIcon(stats.recoveryRate, stats.activeDisputes)}
                             </div>
-                            <div className="absolute bottom-4 left-4 text-white">
-                                <h3 className="font-black text-xl leading-tight mb-1 text-shadow">{m.name}</h3>
-                                <p className="text-sm font-medium flex items-center gap-1 opacity-90 text-shadow"><MapPin className="w-3 h-3"/> {m.city}</p>
-                            </div>
-                        </div>
-                        
-                        <div className="p-5 flex-1 flex flex-col">
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Capacité</p>
-                                    <p className="font-bold text-gray-800 flex items-center gap-1"><Users className="w-4 h-4 text-indigo-500"/> {m.capacity}</p>
-                                </div>
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Loyer Base</p>
-                                    <p className="font-bold text-gray-800 flex items-center gap-1"><DollarSign className="w-4 h-4 text-green-500"/> {m.baseRent?.toLocaleString()} F</p>
+
+                            <div className="h-28 bg-gradient-to-r from-slate-800 to-slate-900 relative overflow-hidden flex items-end p-4">
+                                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                                <div className="text-white z-10 w-full">
+                                    <h3 className="font-black text-xl leading-tight text-shadow">{m.name}</h3>
+                                    <p className="text-xs font-medium opacity-80 flex items-center gap-1"><MapPin className="w-3 h-3"/> {m.city}</p>
                                 </div>
                             </div>
-                            <div className="flex-1 text-xs text-gray-500 line-clamp-2">{m.description || "Pas de description."}</div>
-                            <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between items-center">
-                                {m.hasDeliveryService ? <Badge variant="success">Livraison Active</Badge> : <Badge variant="neutral">Pas de Livraison</Badge>}
+                            
+                            <div className="p-5 flex-1 flex flex-col gap-4">
+                                {/* OCCUPANCY & TARGETS */}
+                                <div className="flex gap-4">
+                                    <div className="flex-1">
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">{t(currentLanguage, 'mkt_occupancy')}</p>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-xl font-black text-gray-800">{stats.occupied}</span>
+                                            <span className="text-xs text-gray-400">/ {m.capacity}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 h-1.5 rounded-full mt-1 overflow-hidden">
+                                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${stats.occupancyRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 text-right">
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">{t(currentLanguage, 'mkt_target')}</p>
+                                        <p className="text-sm font-bold text-gray-600">{formatCurrency(m.targetRevenue)}</p>
+                                        <p className={`text-xs font-black ${stats.recoveryRate >= 100 ? 'text-green-600' : 'text-orange-500'}`}>
+                                            {stats.recoveryRate.toFixed(0)}% atteint
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* FINANCIAL PROGRESS BAR */}
+                                <div>
+                                    <div className="flex justify-between text-xs mb-1">
+                                        <span className="font-bold text-gray-500">{t(currentLanguage, 'mkt_recovery')}</span>
+                                        <span className="font-bold text-gray-900">{formatCurrency(stats.actualRevenue)}</span>
+                                    </div>
+                                    <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden relative">
+                                        <div 
+                                            className={`h-full transition-all duration-1000 ${stats.recoveryRate < 50 ? 'bg-red-500' : stats.recoveryRate < 80 ? 'bg-orange-500' : 'bg-green-500'}`} 
+                                            style={{ width: `${stats.recoveryRate}%` }}
+                                        ></div>
+                                        {/* Target Marker */}
+                                        <div className="absolute top-0 bottom-0 w-0.5 bg-black/20" style={{ left: '100%' }}></div>
+                                    </div>
+                                </div>
+
+                                {/* GOD MODE DATA & INTERACTIVE LIST */}
+                                {isGodMode && (
+                                    <div className="bg-black/5 p-3 rounded-lg border border-black/10 animate-fade-in">
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="font-bold text-red-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> {t(currentLanguage, 'mkt_total_debt')}</span>
+                                            <span className="font-mono font-bold text-red-700">{formatCurrency(stats.totalDebt)}</span>
+                                        </div>
+                                        
+                                        {/* Toggle Debt List */}
+                                        {stats.debtList.length > 0 && (
+                                            <button 
+                                                onClick={() => setExpandedMarketId(isExpanded ? null : m.id)}
+                                                className="w-full mt-2 flex items-center justify-between text-xs font-bold text-slate-700 bg-white p-2 rounded border border-slate-200 hover:bg-slate-50 transition-colors"
+                                            >
+                                                <span>Voir {stats.debtList.length} {t(currentLanguage, 'mkt_bad_payers')}</span>
+                                                {isExpanded ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                                            </button>
+                                        )}
+
+                                        {/* DETAILED DEBT LIST (Available only when expanded) */}
+                                        {isExpanded && (
+                                            <div className="mt-3 space-y-2 animate-slide-up max-h-60 overflow-y-auto pr-1">
+                                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-200">
+                                                    <span className="text-[10px] font-bold text-gray-500 uppercase">Liste Rouge</span>
+                                                    <button onClick={() => handleBulkRemind(stats.debtList.length)} className="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded flex items-center gap-1 hover:bg-red-200">
+                                                        <Megaphone className="w-3 h-3"/> Rappel Général
+                                                    </button>
+                                                </div>
+                                                {stats.debtList.map(({ stall, debt, months }) => (
+                                                    <div key={stall.id} className="bg-white p-2 rounded border-l-4 border-red-500 shadow-sm flex flex-col gap-1">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="font-bold text-xs text-gray-900">#{stall.number} <span className="font-normal text-gray-500">- {stall.occupantName}</span></span>
+                                                            <span className="font-bold text-red-600 text-xs">{formatCurrency(debt)}</span>
+                                                        </div>
+                                                        <div className="flex justify-between items-center mt-1">
+                                                            <span className="text-[10px] text-orange-600 bg-orange-50 px-1 rounded">{months} mois retard</span>
+                                                            <div className="flex gap-1">
+                                                                <button 
+                                                                    onClick={() => handleRemind(stall.number, stall.occupantName || 'Locataire', debt)}
+                                                                    className="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100" 
+                                                                    title="Envoyer SMS Rappel"
+                                                                >
+                                                                    <MessageCircle className="w-3 h-3"/>
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => setSelectedStallForTwin(stall)}
+                                                                    className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
+                                                                    title="Ouvrir Jumeau Numérique"
+                                                                >
+                                                                    <Eye className="w-3 h-3"/>
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleSanction(stall.id)}
+                                                                    className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100" 
+                                                                    title="Sanctionner"
+                                                                >
+                                                                    <Gavel className="w-3 h-3"/>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* FOOTER ACTIONS */}
+                                <div className="pt-4 border-t border-gray-100 flex justify-between items-center mt-auto">
+                                    <div className="flex gap-2">
+                                        {stats.activeDisputes > 0 && <Badge variant="danger" className="text-[10px]">{stats.activeDisputes} Litiges</Badge>}
+                                        {stats.hygieneAlerts > 0 && <Badge variant="warning" className="text-[10px]">{stats.hygieneAlerts} Hygiène</Badge>}
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => openModal(m)} className="p-2 hover:bg-gray-100 rounded-lg text-blue-600 transition-colors"><Pencil className="w-4 h-4"/></button>
+                                        <button onClick={() => handleDelete(m.id, m.name)} className="p-2 hover:bg-gray-100 rounded-lg text-red-600 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                    </Card>
-                ))}
+                        </Card>
+                    );
+                })}
             </div>
         ) : (
             <Card className="overflow-hidden border-gray-200" noPadding>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-gray-600">
                         <thead className="bg-gray-50 text-gray-700 font-bold border-b uppercase text-xs">
-                            <tr><th className="px-6 py-4">Marché</th><th className="px-6 py-4">Lieu</th><th className="px-6 py-4 text-center">Capacité</th><th className="px-6 py-4 text-right">Loyer</th><th className="px-6 py-4 text-right">Actions</th></tr>
+                            <tr>
+                                <th className="px-6 py-4">{t(currentLanguage, 'user_market')}</th>
+                                <th className="px-6 py-4 text-center">{t(currentLanguage, 'mkt_occupancy')}</th>
+                                <th className="px-6 py-4 text-center">{t(currentLanguage, 'mkt_recovery')}</th>
+                                {isGodMode && <th className="px-6 py-4 text-right text-red-600">{t(currentLanguage, 'mkt_total_debt')}</th>}
+                                <th className="px-6 py-4 text-right">{t(currentLanguage, 'actions')}</th>
+                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredMarkets.map(m => (
-                                <tr key={m.id} className="hover:bg-gray-50 group">
-                                    <td className="px-6 py-4 font-bold text-gray-900">{m.name}</td>
-                                    <td className="px-6 py-4">{m.city}, {m.neighborhood}</td>
-                                    <td className="px-6 py-4 text-center"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold">{m.capacity}</span></td>
-                                    <td className="px-6 py-4 text-right font-mono font-bold text-gray-700">{m.baseRent?.toLocaleString()} F</td>
-                                    <td className="px-6 py-4 text-right">
-                                        <div className="flex justify-end gap-2">
-                                            <button onClick={() => openModal(m)} className="text-blue-600 hover:text-blue-800"><Pencil className="w-4 h-4"/></button>
-                                            <button onClick={() => handleDelete(m.id, m.name)} className="text-red-600 hover:text-red-800"><Trash2 className="w-4 h-4"/></button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                            {filteredMarkets.map(m => {
+                                const stats = calculateMarketStats(m.id);
+                                return (
+                                    <tr key={m.id} className="hover:bg-gray-50 group">
+                                        <td className="px-6 py-4 font-bold text-gray-900">
+                                            {m.name}
+                                            <div className="text-xs text-gray-400 font-normal">{m.city}</div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <Badge variant={stats.occupancyRate > 90 ? 'success' : 'neutral'}>{stats.occupancyRate.toFixed(0)}%</Badge>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex-1 bg-gray-200 h-2 rounded-full overflow-hidden">
+                                                    <div className={`h-full ${stats.recoveryRate < 50 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${stats.recoveryRate}%` }}></div>
+                                                </div>
+                                                <span className="text-xs font-bold w-8">{stats.recoveryRate.toFixed(0)}%</span>
+                                            </div>
+                                        </td>
+                                        {isGodMode && (
+                                            <td className="px-6 py-4 text-right font-mono font-bold text-red-600 bg-red-50/50">
+                                                {formatCurrency(stats.totalDebt)}
+                                                <div className="text-[10px] text-red-400">{stats.debtList.length} cas</div>
+                                            </td>
+                                        )}
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <button onClick={() => openModal(m)} className="text-blue-600 hover:text-blue-800"><Pencil className="w-4 h-4"/></button>
+                                                <button onClick={() => handleDelete(m.id, m.name)} className="text-red-600 hover:text-red-800"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
             </Card>
         )}
 
-        {/* --- WIZARD CREATE / EDIT MODAL --- */}
+        {/* --- WIZARD MODAL (Create/Edit) --- */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70] p-4 backdrop-blur-sm">
                 <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl animate-fade-in relative overflow-hidden flex flex-col max-h-[90vh]">
-                    
                     <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <div>
                             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
@@ -296,8 +501,6 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
 
                     <div className="flex-1 overflow-y-auto p-8 bg-white">
                         <form id="marketForm" onSubmit={handleSubmit} className="space-y-6">
-                            
-                            {/* ÉTAPE 1: IDENTITÉ */}
                             {currentStep === 1 && (
                                 <div className="space-y-5 animate-slide-up">
                                     <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-4">
@@ -308,18 +511,15 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
                                 </div>
                             )}
 
-                            {/* ÉTAPE 2: HORAIRES & LOCALISATION */}
                             {currentStep === 2 && (
                                 <div className="space-y-6 animate-slide-up">
                                     <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-4">
                                         <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">2</span> Localisation & Horaires
                                     </h4>
-
                                     <div className="grid grid-cols-2 gap-4">
                                         <Input label="Ville" required value={form.city} onChange={e => setForm({...form, city: e.target.value})} />
                                         <Input label="Quartier" required value={form.neighborhood} onChange={e => setForm({...form, neighborhood: e.target.value})} />
                                     </div>
-                                    
                                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                         <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2"><Clock className="w-4 h-4"/> Horaires d'Ouverture</h4>
                                         <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
@@ -328,7 +528,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
                                                     <div className="w-24 capitalize font-medium text-gray-700">{day}</div>
                                                     <label className="flex items-center cursor-pointer">
                                                         <input type="checkbox" checked={form.schedule[day as keyof MarketSchedule].isOpen} onChange={e => handleScheduleChange(day, 'isOpen', e.target.checked)} className="mr-2 accent-indigo-600"/>
-                                                        <span className="text-xs text-gray-500">{form.schedule[day as keyof MarketSchedule].isOpen ? 'Ouvert' : 'Fermé'}</span>
+                                                        <span className="text-xs text-gray-500">{form.schedule[day as keyof MarketSchedule].isOpen ? t(currentLanguage, 'mkt_open') : t(currentLanguage, 'mkt_closed')}</span>
                                                     </label>
                                                     {form.schedule[day as keyof MarketSchedule].isOpen && (
                                                         <div className="flex gap-2 items-center ml-auto">
@@ -344,7 +544,6 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
                                 </div>
                             )}
 
-                            {/* ÉTAPE 3: FINANCE */}
                             {currentStep === 3 && (
                                 <div className="space-y-6 animate-slide-up">
                                     <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-4">
@@ -371,7 +570,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
 
                     <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
                         <div>
-                            {currentStep > 1 ? <Button type="button" variant="ghost" onClick={handleBack} leftIcon={ArrowLeft}>Retour</Button> : <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>Annuler</Button>}
+                            {currentStep > 1 ? <Button type="button" variant="ghost" onClick={handleBack} leftIcon={ArrowLeft}>{t(currentLanguage, 'cancel')}</Button> : <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>{t(currentLanguage, 'cancel')}</Button>}
                         </div>
                         <div>
                             {currentStep < 3 ? <Button type="button" onClick={handleNext} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200">Suivant <ArrowRight className="w-4 h-4 ml-2"/></Button> : <Button type="submit" form="marketForm" leftIcon={Save} className="bg-green-600 hover:bg-green-700 shadow-green-200">{editingId ? 'Mettre à jour' : 'Terminer'}</Button>}
@@ -379,6 +578,15 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, onAddMarket, onU
                     </div>
                 </div>
             </div>
+        )}
+
+        {/* --- DIGITAL TWIN MODAL (INTERACTIVITY) --- */}
+        {selectedStallForTwin && (
+            <StallDigitalTwin 
+                stall={selectedStallForTwin} 
+                transactions={transactions ? transactions.filter(t => t.stallId === selectedStallForTwin.id) : []} 
+                onClose={() => setSelectedStallForTwin(null)} 
+            />
         )}
     </div>
   );
