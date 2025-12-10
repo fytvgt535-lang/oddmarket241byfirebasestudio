@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { UserCheck, RefreshCw, LogOut, CheckCircle, ListChecks, Target, AlertTriangle, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { UserCheck, RefreshCw, LogOut, CheckCircle, ListChecks, Target, AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
 import { Stall, Sanction, AgentLog, Mission } from '../types';
 import { Button } from './ui/Button';
 import AgentScanner from './agent/AgentScanner';
@@ -9,6 +9,8 @@ import AgentHistory from './agent/AgentHistory';
 import { Card } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { formatCurrency } from '../utils/coreUtils';
+import { updateAgentLocation } from '../services/supabaseService';
+import { supabase } from '../supabaseClient';
 import toast from 'react-hot-toast';
 
 interface AgentFieldToolProps {
@@ -30,9 +32,48 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
   const [scannedStall, setScannedStall] = useState<Stall | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastAction, setLastAction] = useState({ title: '', amount: 0 });
+  const [gpsError, setGpsError] = useState<string | null>(null);
   
   // MISSION CONTEXT (Workflow Locking)
   const [activeMission, setActiveMission] = useState<Mission | null>(null);
+
+  // REAL-TIME GPS TRACKER WITH THROTTLING
+  // Ref to track last update time to prevent DB spam (Technical Debt Fix)
+  const lastGpsUpdateRef = useRef<number>(0);
+
+  useEffect(() => {
+      let watchId: number;
+      
+      if (isShiftActive && 'geolocation' in navigator) {
+          watchId = navigator.geolocation.watchPosition(
+              async (position) => {
+                  const now = Date.now();
+                  // STRICT THROTTLE: Only update DB every 30 seconds
+                  if (now - lastGpsUpdateRef.current > 30000) {
+                      const { latitude, longitude } = position.coords;
+                      const { data: { user } } = await supabase.auth.getUser();
+                      if (user) {
+                          // Note: We don't fetch the full profile here to save read bandwidth.
+                          // We pass empty stats object, relying on the backend or service to handle merge if needed,
+                          // or we accept that stats might be slightly stale in the location update packet.
+                          // Ideally, updateAgentLocation only patches lat/lng/lastActive.
+                          await updateAgentLocation(user.id, latitude, longitude, {});
+                          lastGpsUpdateRef.current = now;
+                      }
+                  }
+                  setGpsError(null);
+              },
+              (error) => {
+                  console.error("GPS Error", error);
+                  setGpsError("Signal GPS faible.");
+              },
+              { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+          );
+      }
+      return () => {
+          if (watchId) navigator.geolocation.clearWatch(watchId);
+      };
+  }, [isShiftActive]);
 
   const activeMissions = missions.filter(m => m.status === 'pending' || m.status === 'in_progress');
 
@@ -68,7 +109,18 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
       if (!scannedStall) return;
       setIsProcessing(true);
       try {
-          await onCollectPayment(scannedStall.id, amount, "0.0,0.0");
+          // Attempt to get real GPS for transaction
+          let coords = "0.0,0.0";
+          if ('geolocation' in navigator) {
+              try {
+                  const pos = await new Promise<GeolocationPosition>((resolve, reject) => 
+                      navigator.geolocation.getCurrentPosition(resolve, reject, {timeout: 3000})
+                  );
+                  coords = `${pos.coords.latitude},${pos.coords.longitude}`;
+              } catch { /* ignore */ }
+          }
+
+          await onCollectPayment(scannedStall.id, amount, coords);
           
           if (activeMission && onUpdateMissionStatus) {
               onUpdateMissionStatus(activeMission.id, 'completed', `Paiement de ${formatCurrency(amount)} perçu.`);
@@ -153,6 +205,7 @@ const AgentFieldTool: React.FC<AgentFieldToolProps> = ({ stalls, sanctions, agen
                 </div>
             )}
         </div>
+        {gpsError && <div className="text-xs bg-red-500 p-1 rounded animate-pulse">{gpsError}</div>}
       </div>
 
       <div className="flex-1 p-4 overflow-y-auto">

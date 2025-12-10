@@ -177,6 +177,8 @@ export interface User {
       performanceScore: number;
       isShiftActive: boolean;
       lastActive: number;
+      lat?: number; // Real-time Latitude
+      lng?: number; // Real-time Longitude
   };
 }
 
@@ -288,6 +290,8 @@ export interface Agent {
   lastActive: number;
   cashInHand: number;
   isShiftActive: boolean;
+  lat?: number;
+  lng?: number;
   logs: AgentLog[];
 }
 

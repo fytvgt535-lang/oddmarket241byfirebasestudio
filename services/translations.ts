@@ -30,7 +30,7 @@ export const translations = {
     logout: "Déconnexion",
     
     // Dashboard Tabs
-    tab_overview: "Vue d'ensemble",
+    tab_overview: "Tour de Contrôle",
     tab_users: "Utilisateurs",
     tab_space: "Gestion Espace",
     tab_finance: "Finances",
@@ -40,11 +40,21 @@ export const translations = {
     
     // Dashboard Content
     recovery_rate: "Taux de Recouvrement",
-    total_revenue: "Recettes Totales",
-    active_users: "Utilisateurs Actifs",
-    hygiene_alerts: "Alertes Hygiène",
-    financial_evolution: "Évolution Financière",
-    activity_feed: "Flux d'Activité & Géolocalisation",
+    total_revenue: "Recettes Globales",
+    active_users: "Citoyens Connectés",
+    hygiene_alerts: "Alertes Critiques",
+    financial_evolution: "Tendance Financière",
+    activity_feed: "Flux Temps Réel",
+    
+    // Control Tower
+    ct_system_status: "État Système",
+    ct_operational: "Opérationnel",
+    ct_sync_queue: "File Synchro",
+    ct_active_markets: "Marchés Supervisés",
+    ct_occupancy_avg: "Occupation Moy.",
+    ct_revenue_today: "Recettes du Jour",
+    ct_agents_active: "Agents Terrain",
+    ct_security_alert: "Sécurité",
     
     // Activity Feed
     feed_transaction: "Transaction Financière",
@@ -177,7 +187,7 @@ export const translations = {
     logout: "Logout",
     
     // Dashboard Tabs
-    tab_overview: "Overview",
+    tab_overview: "Control Tower",
     tab_users: "User Management",
     tab_space: "Space Management",
     tab_finance: "Finance",
@@ -191,7 +201,17 @@ export const translations = {
     active_users: "Active Users",
     hygiene_alerts: "Hygiene Alerts",
     financial_evolution: "Financial Trends",
-    activity_feed: "Activity Feed & Geolocation",
+    activity_feed: "Live Feed",
+    
+    // Control Tower
+    ct_system_status: "System Status",
+    ct_operational: "Operational",
+    ct_sync_queue: "Sync Queue",
+    ct_active_markets: "Monitored Markets",
+    ct_occupancy_avg: "Avg Occupancy",
+    ct_revenue_today: "Revenue Today",
+    ct_agents_active: "Field Agents",
+    ct_security_alert: "Security",
     
     // Activity Feed
     feed_transaction: "Financial Transaction",

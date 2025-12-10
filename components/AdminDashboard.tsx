@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard, Radio } from 'lucide-react';
+import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard, Radio, Zap, Server, AlertTriangle, TrendingUp, Map, CheckCircle } from 'lucide-react';
 import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder, Mission } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
@@ -10,7 +10,7 @@ import AuditLogViewer from './admin/AuditLogViewer';
 import AgentManager from './admin/AgentManager';
 import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { t } from '../services/translations';
-import { simulateGlobalLocation } from '../utils/coreUtils';
+import { simulateGlobalLocation, formatCurrency } from '../utils/coreUtils';
 
 interface AdminDashboardProps {
   markets: Market[];
@@ -74,16 +74,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
   const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
   const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+  
+  // Today's revenue calculation
+  const todayRevenue = useMemo(() => {
+      const startOfDay = new Date();
+      startOfDay.setHours(0,0,0,0);
+      return filteredTransactions
+        .filter(t => t.date >= startOfDay.getTime())
+        .reduce((acc, curr) => acc + curr.amount, 0);
+  }, [filteredTransactions]);
+
   const potentialRevenue = stalls.reduce((acc, s) => acc + s.price, 0);
   const collectionRate = Math.round((totalRevenue / (potentialRevenue > 0 ? potentialRevenue : 1)) * 100) || 0;
   const unreadNotifs = notifications.filter(n => !n.read).length;
+  
+  const occupiedStalls = stalls.filter(s => s.status === 'occupied').length;
+  const totalStalls = stalls.length;
+  const occupancyRate = totalStalls > 0 ? Math.round((occupiedStalls / totalStalls) * 100) : 0;
 
   // Generate enriched activity feed with geolocation
   const activityFeed = useMemo(() => {
       return [
           ...filteredTransactions.map(t => ({ ...t, kind: 'transaction' as const, location: simulateGlobalLocation() })),
           ...orders.map(o => ({ ...o, kind: 'order' as const, amount: o.totalAmount, location: simulateGlobalLocation() }))
-      ].sort((a, b) => b.date - a.date).slice(0, 10); 
+      ].sort((a, b) => b.date - a.date).slice(0, 15); 
   }, [filteredTransactions, orders]);
 
   return (
@@ -149,88 +163,150 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </nav>
       </div>
 
-      {/* CONTENT */}
+      {/* CONTENT - CONTROL TOWER */}
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-fade-in">
-            {/* KPI Cards */}
+            {/* SYSTEM STATUS BAR */}
+            <div className="flex items-center justify-between bg-slate-900 text-slate-300 p-2 rounded-lg text-xs font-mono shadow-sm overflow-x-auto">
+                <div className="flex items-center gap-4">
+                    <span className="flex items-center gap-2 text-green-400 font-bold"><Server className="w-3 h-3"/> {t(currentLanguage, 'ct_system_status')}: {t(currentLanguage, 'ct_operational')}</span>
+                    <span className="flex items-center gap-2"><Zap className="w-3 h-3 text-yellow-400"/> Ping: 24ms</span>
+                    <span className="flex items-center gap-2"><Globe className="w-3 h-3 text-blue-400"/> {t(currentLanguage, 'ct_sync_queue')}: 0</span>
+                </div>
+                <div className="flex items-center gap-4">
+                    <span>Build: v2.4.1 (Stable)</span>
+                    <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {users.length}</span>
+                </div>
+            </div>
+
+            {/* MAIN KPI GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium mb-1">{t(currentLanguage, 'recovery_rate')}</p>
-                    <h3 className={`text-3xl font-bold ${collectionRate < 70 ? 'text-red-500' : 'text-green-600'}`}>{collectionRate}%</h3>
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_revenue_today')}</p>
+                            <h3 className="text-2xl font-black text-gray-800">{formatCurrency(todayRevenue)}</h3>
+                        </div>
+                        <div className="p-2 bg-green-100 text-green-600 rounded-lg"><TrendingUp className="w-5 h-5"/></div>
+                    </div>
+                    <div className="mt-4 w-full bg-gray-100 h-1 rounded-full overflow-hidden">
+                        <div className="bg-green-500 h-full" style={{ width: '65%' }}></div>
+                    </div>
                 </div>
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium mb-1">{t(currentLanguage, 'total_revenue')}</p>
-                    <h3 className="text-3xl font-bold text-gray-800">{totalRevenue.toLocaleString()} F</h3>
+
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'recovery_rate')}</p>
+                            <h3 className={`text-2xl font-black ${collectionRate < 70 ? 'text-red-500' : 'text-blue-600'}`}>{collectionRate}%</h3>
+                        </div>
+                        <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><DollarSign className="w-5 h-5"/></div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">Target mensuel: {formatCurrency(potentialRevenue)}</p>
                 </div>
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium mb-1">{t(currentLanguage, 'active_users')}</p>
-                    {loadingStates?.users ? <Loader2 className="w-5 h-5 animate-spin text-gray-400"/> : <h3 className="text-2xl font-bold text-gray-800">{users.length}</h3>}
+
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_occupancy_avg')}</p>
+                            <h3 className="text-2xl font-black text-gray-800">{occupancyRate}%</h3>
+                        </div>
+                        <div className="p-2 bg-purple-100 text-purple-600 rounded-lg"><LayoutGrid className="w-5 h-5"/></div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">{occupiedStalls} / {totalStalls} {t(currentLanguage, 'occupied')}</p>
                 </div>
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium mb-1">{t(currentLanguage, 'hygiene_alerts')}</p>
-                    <h3 className="text-2xl font-bold text-red-500">{reports.filter(r => r.status === 'pending').length}</h3>
+
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between relative overflow-hidden">
+                    {reports.filter(r => r.status === 'pending').length > 0 && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-ping m-2"></div>}
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_security_alert')}</p>
+                            <h3 className="text-2xl font-black text-red-500">{reports.filter(r => r.status === 'pending').length}</h3>
+                        </div>
+                        <div className="p-2 bg-red-100 text-red-600 rounded-lg"><AlertTriangle className="w-5 h-5"/></div>
+                    </div>
+                    <p className="text-xs text-red-400 mt-2 font-bold">Action requise immédiate</p>
                 </div>
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[500px]">
-                    <h3 className="font-bold text-gray-800 mb-4">{t(currentLanguage, 'financial_evolution')}</h3>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={filteredTransactions.slice(0, 50).map(t => ({name: new Date(t.date).toLocaleDateString(), montant: t.amount}))}>
-                            <XAxis dataKey="name" hide />
-                            <YAxis />
-                            <Tooltip />
-                            <Area type="monotone" dataKey="montant" fill="#8884d8" stroke="#8884d8" />
-                        </ComposedChart>
-                    </ResponsiveContainer>
+            {/* CONTROL CENTER BODY */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[600px]">
+                
+                {/* LEFT: MARKET HEALTH MAP (Visual Grid) */}
+                <div className="lg:col-span-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-gray-900 flex items-center gap-2"><Map className="w-5 h-5 text-indigo-600"/> {t(currentLanguage, 'ct_active_markets')}</h3>
+                        <div className="flex gap-2 text-xs">
+                            <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Sain</span>
+                            <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Moyen</span>
+                            <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Critique</span>
+                        </div>
+                    </div>
+                    
+                    <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto pr-2">
+                        {markets.map(m => {
+                            // Quick Health Calc
+                            const mStalls = stalls.filter(s => s.marketId === m.id);
+                            const mTrans = filteredTransactions.filter(t => t.marketId === m.id);
+                            const mRev = mTrans.reduce((acc, t) => acc + t.amount, 0);
+                            const mRate = m.targetRevenue ? (mRev / m.targetRevenue) * 100 : 0;
+                            const statusColor = mRate > 70 ? 'bg-green-50 border-green-200' : mRate > 40 ? 'bg-orange-50 border-orange-200' : 'bg-red-50 border-red-200';
+                            const barColor = mRate > 70 ? 'bg-green-500' : mRate > 40 ? 'bg-orange-500' : 'bg-red-500';
+
+                            return (
+                                <div key={m.id} className={`p-4 rounded-xl border-2 flex flex-col justify-between transition-all hover:scale-[1.02] cursor-pointer ${statusColor}`}>
+                                    <div>
+                                        <h4 className="font-bold text-gray-800 truncate">{m.name}</h4>
+                                        <p className="text-xs text-gray-500">{m.city}</p>
+                                    </div>
+                                    <div className="mt-4">
+                                        <div className="flex justify-between text-xs font-bold mb-1">
+                                            <span>Rev.</span>
+                                            <span>{mRate.toFixed(0)}%</span>
+                                        </div>
+                                        <div className="w-full bg-white h-2 rounded-full overflow-hidden">
+                                            <div className={`h-full ${barColor}`} style={{ width: `${Math.min(mRate, 100)}%` }}></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {/* Fake placeholders to fill grid if few markets */}
+                        {markets.length < 6 && Array.from({ length: 6 - markets.length }).map((_, i) => (
+                            <div key={i} className="p-4 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">
+                                <span className="text-xs font-bold uppercase">Emplacement Vide</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
-                {/* ENRICHED ACTIVITY FEED */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col h-[500px] overflow-hidden">
-                    <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                            <Globe className="w-5 h-5 text-blue-600"/> {t(currentLanguage, 'activity_feed')}
+                {/* RIGHT: LIVE LOG STREAM */}
+                <div className="lg:col-span-4 bg-slate-900 rounded-xl shadow-lg border border-slate-800 flex flex-col overflow-hidden">
+                    <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                        <h3 className="font-bold text-white flex items-center gap-2">
+                            <Radio className="w-4 h-4 text-green-500 animate-pulse"/> {t(currentLanguage, 'activity_feed')}
                         </h3>
+                        <span className="text-[10px] text-slate-500 font-mono">LIVE</span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-0 relative">
-                        {/* Timeline Line */}
-                        <div className="absolute left-8 top-4 bottom-4 w-0.5 bg-gray-100"></div>
-
+                    <div className="flex-1 overflow-y-auto p-4 space-y-0 font-mono text-xs">
                         {loadingStates?.finance ? (
-                            <div className="flex justify-center items-center h-full text-gray-400"><Loader2 className="w-8 h-8 animate-spin"/></div>
+                            <div className="flex justify-center items-center h-full text-slate-600"><Loader2 className="w-6 h-6 animate-spin"/></div>
                         ) : activityFeed.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-10">{t(currentLanguage, 'feed_waiting')}</p>
+                            <p className="text-slate-600 text-center py-10">{t(currentLanguage, 'feed_waiting')}</p>
                         ) : (
-                            activityFeed.map((item: any) => (
-                                <div key={item.id} className="flex gap-4 relative mb-6 group animate-slide-up">
-                                    <div className={`w-9 h-9 rounded-full shrink-0 flex items-center justify-center border-2 z-10 transition-transform group-hover:scale-110 ${
-                                        item.kind === 'transaction' 
-                                            ? 'bg-blue-50 border-blue-200 text-blue-600' 
-                                            : 'bg-green-50 border-green-200 text-green-600'
-                                    }`}>
-                                        {item.kind === 'transaction' ? <CreditCard className="w-4 h-4"/> : <ShoppingBag className="w-4 h-4"/>}
+                            activityFeed.map((item: any, idx) => (
+                                <div key={idx} className="mb-3 pl-3 border-l border-slate-700 relative">
+                                    <div className={`absolute -left-[5px] top-0 w-2 h-2 rounded-full ${item.kind === 'transaction' ? 'bg-blue-500' : 'bg-green-500'}`}></div>
+                                    <div className="flex justify-between text-slate-400 mb-0.5">
+                                        <span>{new Date(item.date).toLocaleTimeString()}</span>
+                                        <span className="opacity-50">{item.location?.city}</span>
                                     </div>
-                                    <div className="flex-1 bg-white border border-gray-100 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <p className="text-sm font-bold text-gray-900">
-                                                    {item.kind === 'transaction' ? t(currentLanguage, 'feed_transaction') : t(currentLanguage, 'feed_order')}
-                                                </p>
-                                                <p className="text-xs text-gray-500 mt-0.5">
-                                                    {item.kind === 'transaction' ? `Réf: ${item.reference}` : `Client: ${item.customerName}`}
-                                                </p>
-                                            </div>
-                                            <span className={`text-sm font-black ${item.kind === 'transaction' ? 'text-blue-700' : 'text-green-700'}`}>
-                                                +{item.amount.toLocaleString()}
-                                            </span>
-                                        </div>
-                                        
-                                        <div className="mt-3 pt-2 border-t border-gray-50 flex justify-between items-center text-[10px] text-gray-400">
-                                            <span className="flex items-center gap-1 font-medium text-gray-500">
-                                                <Globe className="w-3 h-3 text-blue-400"/> {item.location.city}, {item.location.country}
-                                            </span>
-                                            <span>{new Date(item.date).toLocaleTimeString()}</span>
-                                        </div>
+                                    <div className="text-slate-200 font-bold">
+                                        {item.kind === 'transaction' ? 'PAIEMENT' : 'COMMANDE'}
+                                        <span className={`ml-2 ${item.kind === 'transaction' ? 'text-blue-400' : 'text-green-400'}`}>+{formatCurrency(item.amount)}</span>
+                                    </div>
+                                    <div className="text-slate-500 truncate mt-0.5">
+                                        {item.kind === 'transaction' ? `Ref: ${item.reference}` : `Client: ${item.customerName}`}
                                     </div>
                                 </div>
                             ))

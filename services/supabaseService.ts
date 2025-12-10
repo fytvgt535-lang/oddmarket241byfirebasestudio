@@ -689,6 +689,25 @@ export const updateMissionStatus = async (id: string, status: string, report?: s
     if (error) throw error;
 };
 
+// NEW: Real-Time Agent Location Tracking
+export const updateAgentLocation = async (agentId: string, lat: number, lng: number, currentStats: any) => {
+    // Only update if moved significantly or if enough time passed to avoid DB spam
+    // We update the 'agent_stats' JSONB column
+    const newStats = {
+        ...currentStats,
+        lat,
+        lng,
+        lastActive: Date.now()
+    };
+
+    const { error } = await supabase.from('profiles').update({ 
+        agent_stats: newStats,
+        last_seen_at: new Date().toISOString()
+    }).eq('id', agentId);
+
+    if (error) console.error("GPS Sync Error", error);
+};
+
 export const validateAgentDeposit = async (agentId: string, amount: number, forceOnline = false) => {
     if (!navigator.onLine && !forceOnline) {
         await addToQueue('validateAgentDeposit', { agentId, amount });

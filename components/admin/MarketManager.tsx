@@ -9,7 +9,6 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { formatCurrency, calculateStallDebt } from '../../utils/coreUtils';
 import StallDigitalTwin from '../StallDigitalTwin';
-import { t } from '../../services/translations';
 
 interface MarketManagerProps {
   markets: Market[];
@@ -22,7 +21,6 @@ interface MarketManagerProps {
   onDeleteMarket: (id: string) => void;
   viewMode: 'grid' | 'list';
   setViewMode: (mode: 'grid' | 'list') => void;
-  currentLanguage?: string;
 }
 
 const DEFAULT_SCHEDULE: MarketSchedule = {
@@ -35,7 +33,7 @@ const DEFAULT_SCHEDULE: MarketSchedule = {
     dimanche: { open: '08:00', close: '13:00', isOpen: true },
 };
 
-const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], transactions = [], sanctions = [], reports = [], onAddMarket, onUpdateMarket, onDeleteMarket, viewMode, setViewMode, currentLanguage = 'fr' }) => {
+const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], transactions = [], sanctions = [], reports = [], onAddMarket, onUpdateMarket, onDeleteMarket, viewMode, setViewMode }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -243,8 +241,8 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                     <Store className="w-8 h-8"/>
                 </div>
                 <div>
-                    <h3 className="text-xl font-bold text-gray-900">{t(currentLanguage, 'mkt_management')}</h3>
-                    <p className="text-sm text-gray-500 font-medium">{t(currentLanguage, 'mkt_subtitle')}</p>
+                    <h3 className="text-xl font-bold text-gray-900">Gestion des Marchés</h3>
+                    <p className="text-sm text-gray-500 font-medium">Vue stratégique et opérationnelle.</p>
                 </div>
             </div>
             
@@ -256,14 +254,14 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                     title="Afficher les données sensibles (Dettes, Risques)"
                 >
                     <Eye className="w-4 h-4"/>
-                    <span className="text-xs font-bold uppercase hidden md:inline">{isGodMode ? t(currentLanguage, 'mkt_god_mode') : t(currentLanguage, 'mkt_std_mode')}</span>
+                    <span className="text-xs font-bold uppercase hidden md:inline">{isGodMode ? "Mode: Oeil de Dieu" : "Mode: Standard"}</span>
                 </button>
 
                 <div className="relative flex-1 md:w-48">
                     <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400"/>
                     <input 
                         type="text" 
-                        placeholder={`${t(currentLanguage, 'search_placeholder')}...`} 
+                        placeholder="Rechercher..." 
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -273,7 +271,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                     <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}><LayoutGrid className="w-5 h-5"/></button>
                     <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}><List className="w-5 h-5"/></button>
                 </div>
-                <Button variant="primary" onClick={() => openModal()} leftIcon={Plus} className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200">{t(currentLanguage, 'add')}</Button>
+                <Button variant="primary" onClick={() => openModal()} leftIcon={Plus} className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200">Ajouter</Button>
             </div>
         </div>
 
@@ -309,7 +307,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                 {/* OCCUPANCY & TARGETS */}
                                 <div className="flex gap-4">
                                     <div className="flex-1">
-                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">{t(currentLanguage, 'mkt_occupancy')}</p>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Occupation</p>
                                         <div className="flex items-baseline gap-1">
                                             <span className="text-xl font-black text-gray-800">{stats.occupied}</span>
                                             <span className="text-xs text-gray-400">/ {m.capacity}</span>
@@ -319,7 +317,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                         </div>
                                     </div>
                                     <div className="flex-1 text-right">
-                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">{t(currentLanguage, 'mkt_target')}</p>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Objectif Mensuel</p>
                                         <p className="text-sm font-bold text-gray-600">{formatCurrency(m.targetRevenue)}</p>
                                         <p className={`text-xs font-black ${stats.recoveryRate >= 100 ? 'text-green-600' : 'text-orange-500'}`}>
                                             {stats.recoveryRate.toFixed(0)}% atteint
@@ -330,7 +328,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                 {/* FINANCIAL PROGRESS BAR */}
                                 <div>
                                     <div className="flex justify-between text-xs mb-1">
-                                        <span className="font-bold text-gray-500">{t(currentLanguage, 'mkt_recovery')}</span>
+                                        <span className="font-bold text-gray-500">Recouvrement</span>
                                         <span className="font-bold text-gray-900">{formatCurrency(stats.actualRevenue)}</span>
                                     </div>
                                     <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden relative">
@@ -347,7 +345,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                 {isGodMode && (
                                     <div className="bg-black/5 p-3 rounded-lg border border-black/10 animate-fade-in">
                                         <div className="flex justify-between items-center text-xs">
-                                            <span className="font-bold text-red-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> {t(currentLanguage, 'mkt_total_debt')}</span>
+                                            <span className="font-bold text-red-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Impayés Total</span>
                                             <span className="font-mono font-bold text-red-700">{formatCurrency(stats.totalDebt)}</span>
                                         </div>
                                         
@@ -357,7 +355,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                                 onClick={() => setExpandedMarketId(isExpanded ? null : m.id)}
                                                 className="w-full mt-2 flex items-center justify-between text-xs font-bold text-slate-700 bg-white p-2 rounded border border-slate-200 hover:bg-slate-50 transition-colors"
                                             >
-                                                <span>Voir {stats.debtList.length} {t(currentLanguage, 'mkt_bad_payers')}</span>
+                                                <span>Voir {stats.debtList.length} mauvais payeurs</span>
                                                 {isExpanded ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
                                             </button>
                                         )}
@@ -432,11 +430,11 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                     <table className="w-full text-sm text-left text-gray-600">
                         <thead className="bg-gray-50 text-gray-700 font-bold border-b uppercase text-xs">
                             <tr>
-                                <th className="px-6 py-4">{t(currentLanguage, 'user_market')}</th>
-                                <th className="px-6 py-4 text-center">{t(currentLanguage, 'mkt_occupancy')}</th>
-                                <th className="px-6 py-4 text-center">{t(currentLanguage, 'mkt_recovery')}</th>
-                                {isGodMode && <th className="px-6 py-4 text-right text-red-600">{t(currentLanguage, 'mkt_total_debt')}</th>}
-                                <th className="px-6 py-4 text-right">{t(currentLanguage, 'actions')}</th>
+                                <th className="px-6 py-4">Marché</th>
+                                <th className="px-6 py-4 text-center">Occupation</th>
+                                <th className="px-6 py-4 text-center">Recouvrement</th>
+                                {isGodMode && <th className="px-6 py-4 text-right text-red-600">Dette Totale</th>}
+                                <th className="px-6 py-4 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -528,7 +526,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
                                                     <div className="w-24 capitalize font-medium text-gray-700">{day}</div>
                                                     <label className="flex items-center cursor-pointer">
                                                         <input type="checkbox" checked={form.schedule[day as keyof MarketSchedule].isOpen} onChange={e => handleScheduleChange(day, 'isOpen', e.target.checked)} className="mr-2 accent-indigo-600"/>
-                                                        <span className="text-xs text-gray-500">{form.schedule[day as keyof MarketSchedule].isOpen ? t(currentLanguage, 'mkt_open') : t(currentLanguage, 'mkt_closed')}</span>
+                                                        <span className="text-xs text-gray-500">{form.schedule[day as keyof MarketSchedule].isOpen ? 'Ouvert' : 'Fermé'}</span>
                                                     </label>
                                                     {form.schedule[day as keyof MarketSchedule].isOpen && (
                                                         <div className="flex gap-2 items-center ml-auto">
@@ -570,7 +568,7 @@ const MarketManager: React.FC<MarketManagerProps> = ({ markets, stalls = [], tra
 
                     <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
                         <div>
-                            {currentStep > 1 ? <Button type="button" variant="ghost" onClick={handleBack} leftIcon={ArrowLeft}>{t(currentLanguage, 'cancel')}</Button> : <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>{t(currentLanguage, 'cancel')}</Button>}
+                            {currentStep > 1 ? <Button type="button" variant="ghost" onClick={handleBack} leftIcon={ArrowLeft}>Retour</Button> : <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>Annuler</Button>}
                         </div>
                         <div>
                             {currentStep < 3 ? <Button type="button" onClick={handleNext} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200">Suivant <ArrowRight className="w-4 h-4 ml-2"/></Button> : <Button type="submit" form="marketForm" leftIcon={Save} className="bg-green-600 hover:bg-green-700 shadow-green-200">{editingId ? 'Mettre à jour' : 'Terminer'}</Button>}
