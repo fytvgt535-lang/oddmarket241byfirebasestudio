@@ -8,13 +8,22 @@ export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
 export interface AuditLog {
   id: string;
   actorId: string;
-  actorName?: string; // Joined field
+  actorName?: string;
   targetId: string;
   action: string;
   oldValue?: any;
   newValue?: any;
   reason?: string;
-  createdAt: number;
+  metadata?: {
+    ip?: string;
+    device?: string;
+    browser?: string;
+    os?: string;
+    location?: string;
+    userAgent?: string;
+  };
+  created_at?: string; // Format ISO string venant de la DB
+  createdAt: number;   // Timestamp JS
 }
 
 export interface UserActivity {
@@ -83,7 +92,6 @@ export interface IdentityDocument {
   uploadedAt: number;
 }
 
-// --- NEW CLIENT FEATURES ---
 export interface UserAddress {
   id: string;
   label: string;

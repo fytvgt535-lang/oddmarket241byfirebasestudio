@@ -6,6 +6,59 @@ import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, 
 const QUEUE_KEY = 'mc_action_queue';
 const FAILED_QUEUE_KEY = 'mc_failed_queue';
 
+// --- UTILS AUDIT & DEVICE ---
+// "L'Oeil de Dieu" - Capture des métadonnées techniques pour l'audit
+const getDeviceInfo = () => {
+    const ua = navigator.userAgent;
+    let device = "Desktop";
+    let os = "Inconnu";
+    let browser = "Inconnu";
+
+    if (/Mobi|Android/i.test(ua)) device = "Mobile";
+    if (/iPad|Tablet/i.test(ua)) device = "Tablette";
+
+    if (ua.indexOf("Win") !== -1) os = "Windows";
+    if (ua.indexOf("Mac") !== -1) os = "MacOS";
+    if (ua.indexOf("Linux") !== -1) os = "Linux";
+    if (ua.indexOf("Android") !== -1) os = "Android";
+    if (ua.indexOf("like Mac") !== -1) os = "iOS";
+
+    if (ua.indexOf("Chrome") !== -1) browser = "Chrome";
+    else if (ua.indexOf("Safari") !== -1) browser = "Safari";
+    else if (ua.indexOf("Firefox") !== -1) browser = "Firefox";
+    else if (ua.indexOf("Edg") !== -1) browser = "Edge";
+
+    return { device, os, browser, userAgent: ua };
+};
+
+export const logSystemAction = async (actorId: string, action: string, targetId: string, newValue?: any, reason?: string) => {
+    const meta = getDeviceInfo();
+    const payload = {
+        actor_id: actorId,
+        action,
+        target_id: targetId,
+        new_value: { 
+            ...newValue, 
+            _meta: { 
+                ...meta, 
+                timestamp: Date.now(), 
+                url: window.location.href 
+            } 
+        },
+        reason,
+        created_at: new Date().toISOString()
+    };
+
+    // Tente un envoi direct pour l'audit (critique)
+    const { error } = await supabase.from('audit_logs').insert([payload]);
+    
+    if (error) {
+        console.error("Audit Log Failure:", error);
+        // Fallback queue si échec critique, l'audit ne doit pas être perdu
+        addToQueue('logAuditFallback', payload);
+    }
+};
+
 // --- OFFLINE QUEUE SYSTEM ---
 interface QueueItem {
   id: number;
@@ -76,6 +129,7 @@ const executeAction = async (action: string, payload: any) => {
     case 'createOrder': return createOrder(payload, true);
     case 'updateUserProfile': return updateUserProfile(payload.id, payload.updates, true);
     case 'reserveStall': return reserveStall(payload.stallId, payload.userId, undefined, undefined, true);
+    case 'logAuditFallback': return supabase.from('audit_logs').insert([payload]); // Retry log
     default: throw new Error(`Unknown action: ${action}`);
   }
 };
@@ -140,7 +194,6 @@ const mapProfile = (data: any): User => ({
   preferences: data.preferences
 });
 
-// Mapping Helper: DB (snake_case) -> App (camelCase)
 const mapMarketFromDB = (m: any): Market => ({
     id: m.id,
     name: m.name,
@@ -154,7 +207,6 @@ const mapMarketFromDB = (m: any): Market => ({
     image: m.image_url
 });
 
-// Mapping Helper: App (camelCase) -> DB (snake_case)
 const mapMarketToDB = (m: any) => {
     const payload: any = {};
     if (m.name !== undefined) payload.name = m.name;
@@ -174,6 +226,13 @@ const mapMarketToDB = (m: any) => {
 export const signInUser = async (email: string, pass: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
+    
+    // AUDIT LOG: LOGIN
+    if (data.user) {
+        logSystemAction(data.user.id, 'USER_LOGIN', data.user.id, { email }, 'Connexion au portail');
+        // Update last login
+        await supabase.from('profiles').update({ last_login: new Date().toISOString() }).eq('id', data.user.id);
+    }
     return data;
 };
 
@@ -190,10 +249,17 @@ export const signUpUser = async (email: string, pass: string, meta: any) => {
         }
     });
     if (error) throw error;
+    if (data.user) {
+        logSystemAction(data.user.id, 'USER_REGISTER', data.user.id, { email, role: meta.accountType }, 'Création de compte');
+    }
     return data;
 };
 
 export const signOutUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+        logSystemAction(user.id, 'USER_LOGOUT', user.id, {}, 'Déconnexion manuelle');
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
 };
@@ -202,10 +268,14 @@ export const resetPasswordForEmail = async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin + '/reset-password',
     });
+    // On ne log pas l'acteur ici car il n'est pas connecté, mais on pourrait loguer la demande système
     if (error) throw error;
 };
 
 export const updateUserPassword = async (newPass: string, currentPass?: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'PASSWORD_UPDATE', user.id, {}, 'Changement mot de passe');
+    
     const { error } = await supabase.auth.updateUser({ password: newPass });
     if (error) throw error;
 };
@@ -222,6 +292,7 @@ export const deleteUserAccount = async (password: string) => {
     const verified = await verifyPassword(user.email, password);
     if (!verified) throw new Error("Mot de passe incorrect");
 
+    logSystemAction(user.id, 'ACCOUNT_DELETE_REQUEST', user.id, { email: user.email }, 'Demande suppression compte');
     console.warn("Account deletion requested.");
     await signOutUser();
 };
@@ -249,6 +320,9 @@ export const createTransaction = async (t: any, forceOnline = false) => {
     }]).select().single();
     
     if (error) throw error;
+    
+    if (t.collectedBy) logSystemAction(t.collectedBy, 'CREATE_TRANSACTION', data.id, { amount: t.amount, type: t.type }, `Paiement ${t.type}`);
+    
     return { ...data, date: new Date(data.date).getTime() };
 };
 
@@ -266,6 +340,8 @@ export const createSanction = async (s: any, forceOnline = false) => {
     if (error) throw error;
     if (s.stallId) await supabase.from('stalls').update({ health_status: 'warning' }).eq('id', s.stallId);
     
+    if (s.issuedBy) logSystemAction(s.issuedBy, 'ISSUE_SANCTION', data.id, { amount: s.amount, stall: s.stallNumber }, s.reason);
+
     return { ...data, date: new Date(data.date).getTime() };
 };
 
@@ -327,6 +403,8 @@ export const createMarket = async (m: any) => {
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').insert([payload]).select().single(); 
     if (error) throw error;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'CREATE_MARKET', data.id, payload, `Création marché ${m.name}`);
     return mapMarketFromDB(data);
 };
 
@@ -334,12 +412,16 @@ export const updateMarket = async (id: string, m: any) => {
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').update(payload).eq('id', id).select().single();
     if (error) throw error;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'UPDATE_MARKET', id, payload, `Mise à jour marché`);
     return mapMarketFromDB(data);
 };
 
 export const deleteMarket = async (id: string) => { 
     const { error } = await supabase.from('markets').delete().eq('id', id); 
     if (error) throw error;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'DELETE_MARKET', id, {}, `Suppression marché`);
 };
 
 // STALL MANAGEMENT
@@ -367,6 +449,10 @@ export const createStall = async (s: any) => {
 
     const { data, error } = await supabase.from('stalls').insert([payload]).select().single(); 
     if (error) throw error;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) logSystemAction(user.id, 'CREATE_STALL', data.id, { number: s.number }, `Création étal`);
+
     return {
         ...data,
         marketId: data.market_id,
@@ -505,14 +591,15 @@ export const fetchFinancialStats = async () => {
 };
 
 export const fetchAuditLogs = async (): Promise<AuditLog[]> => {
-    const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
     if (error) throw error;
     return (data || []).map((l: any) => ({
         ...l,
         actorId: l.actor_id,
         targetId: l.target_id,
         newValue: l.new_value,
-        createdAt: new Date(l.created_at).getTime()
+        createdAt: new Date(l.created_at).getTime(),
+        metadata: l.new_value?._meta
     }));
 };
 
@@ -579,7 +666,12 @@ export const adminUpdateUserStatus = async (userId: string, updates: Partial<Use
      if (updates.isBanned !== undefined) payload.is_banned = updates.isBanned;
      if (updates.role) payload.role = updates.role;
      if (updates.kycStatus) payload.kyc_status = updates.kycStatus;
-     await supabase.from('profiles').update(payload).eq('id', userId);
+     
+     const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
+     if (error) throw error;
+
+     const { data: { user } } = await supabase.auth.getUser();
+     if (user) logSystemAction(user.id, 'UPDATE_USER_STATUS', userId, updates, 'Modification statut admin');
 };
 
 export const contestSanction = async (sanctionId: string, reason: string, forceOnline = false) => {
@@ -617,7 +709,13 @@ export const updateUserProfile = async (userId: string, updates: Partial<VendorP
      if (anyUpdates.favorites) payload.favorites = anyUpdates.favorites;
      if (anyUpdates.preferences) payload.preferences = anyUpdates.preferences;
      
-     await supabase.from('profiles').update(payload).eq('id', userId);
+     const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
+     if (error) throw error;
+     
+     // Auto log profile updates (except repetitive ones like last_seen)
+     if (!anyUpdates.lastSeenAt) {
+         logSystemAction(userId, 'UPDATE_PROFILE', userId, payload, 'Mise à jour profil utilisateur');
+     }
 };
 
 export const verifyAgentIdentity = async (): Promise<boolean> => {
@@ -637,4 +735,6 @@ export const reserveStall = async (stallId: string, userId: string, provider?: s
         last_payment_date: new Date().toISOString()
     }).eq('id', stallId);
     if (error) throw error;
+    
+    logSystemAction(userId, 'RESERVE_STALL', stallId, { provider }, 'Réservation étal');
 };
