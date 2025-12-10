@@ -81,10 +81,10 @@ export default async function getCroppedImg(
   // paste generated rotate image at the top left corner
   ctx.putImageData(data, 0, 0);
 
-  // As Blob - CONVERTED TO WEBP
+  // As Blob - CONVERTED TO WEBP (Quality 0.8 to match optimizer)
   return new Promise((resolve, reject) => {
     canvas.toBlob((file) => {
       resolve(file);
-    }, 'image/webp', 0.85); // WebP format with good quality
+    }, 'image/webp', 0.8); 
   });
 }

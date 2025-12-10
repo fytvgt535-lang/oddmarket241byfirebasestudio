@@ -1,6 +1,7 @@
 
 import { supabase } from '../supabaseClient';
 import { User, VendorProfile, Market, Stall, Product, Transaction, ClientOrder, Expense, Sanction, AppNotification, Agent, AuditLog, AppRole } from '../types';
+import { compressImage } from '../utils/imageOptimizer';
 
 // --- CONFIGURATION ---
 const QUEUE_KEY = 'mc_action_queue';
@@ -53,7 +54,7 @@ export const logSystemAction = async (actorId: string, action: string, targetId:
     const { error } = await supabase.from('audit_logs').insert([payload]);
     
     if (error) {
-        console.error("Audit Log Failure:", error);
+        // On ne loggue pas l'erreur en console ici pour éviter le spam si la table manque
         // Fallback queue si échec critique, l'audit ne doit pas être perdu
         addToQueue('logAuditFallback', payload);
     }
@@ -204,7 +205,10 @@ const mapMarketFromDB = (m: any): Market => ({
     baseRent: m.base_rent,
     hasDeliveryService: m.has_delivery_service,
     description: m.description,
-    image: m.image_url
+    image: m.image_url,
+    lat: m.lat,
+    lng: m.lng,
+    schedule: m.schedule
 });
 
 const mapMarketToDB = (m: any) => {
@@ -217,7 +221,10 @@ const mapMarketToDB = (m: any) => {
     if (m.baseRent !== undefined) payload.base_rent = m.baseRent;
     if (m.hasDeliveryService !== undefined) payload.has_delivery_service = m.hasDeliveryService;
     if (m.description !== undefined) payload.description = m.description;
-    if (m.image !== undefined) payload.image_url = m.image; 
+    if (m.image !== undefined) payload.image_url = m.image;
+    if (m.lat !== undefined) payload.lat = m.lat;
+    if (m.lng !== undefined) payload.lng = m.lng; 
+    if (m.schedule !== undefined) payload.schedule = m.schedule;
     return payload;
 };
 
@@ -402,7 +409,14 @@ export const updateProduct = async (id: string, updates: any, forceOnline = fals
 export const createMarket = async (m: any) => { 
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').insert([payload]).select().single(); 
-    if (error) throw error;
+    if (error) {
+        console.error("Supabase Create Market Error:", error);
+        // Détection d'erreurs de schéma
+        if (error.code === 'PGRST204' || error.message.includes("Could not find")) {
+             throw new Error(`Colonne manquante dans la DB (Erreur ${error.code}). Veuillez exécuter le script SQL de mise à jour.`);
+        }
+        throw error;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (user) logSystemAction(user.id, 'CREATE_MARKET', data.id, payload, `Création marché ${m.name}`);
     return mapMarketFromDB(data);
@@ -411,7 +425,13 @@ export const createMarket = async (m: any) => {
 export const updateMarket = async (id: string, m: any) => { 
     const payload = mapMarketToDB(m);
     const { data, error } = await supabase.from('markets').update(payload).eq('id', id).select().single();
-    if (error) throw error;
+    if (error) {
+         console.error("Supabase Update Market Error:", error);
+         if (error.code === 'PGRST204' || error.message.includes("Could not find")) {
+             throw new Error(`Colonne manquante dans la DB. Veuillez exécuter le script SQL.`);
+        }
+        throw error;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (user) logSystemAction(user.id, 'UPDATE_MARKET', id, payload, `Mise à jour marché`);
     return mapMarketFromDB(data);
@@ -433,7 +453,7 @@ export const createStall = async (s: any) => {
         price: s.price,
         size: s.size,
         status: s.status || 'free',
-        product_type: s.productType,
+        product_type: s.product_type,
         health_status: s.healthStatus || 'healthy',
         compliance_score: s.complianceScore || 100,
         surface_area: s.surfaceArea,
@@ -592,7 +612,13 @@ export const fetchFinancialStats = async () => {
 
 export const fetchAuditLogs = async (): Promise<AuditLog[]> => {
     const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
-    if (error) throw error;
+    if (error) {
+        if (error.code === '42P01' || error.code === 'PGRST205' || error.message?.includes('audit_logs')) {
+            console.warn("Audit table missing or inaccessible.");
+            return [];
+        }
+        throw error;
+    }
     return (data || []).map((l: any) => ({
         ...l,
         actorId: l.actor_id,
@@ -610,8 +636,16 @@ export const getCurrentUserProfile = async (userId: string): Promise<User | null
 };
 
 export const uploadFile = async (file: File, bucket: string): Promise<string> => {
-    const fileName = `${Date.now()}_${file.name.replace(/\s/g, '_')}`;
-    const { data, error } = await supabase.storage.from(bucket).upload(fileName, file);
+    let fileToUpload = file;
+    try {
+        // Optimisation automatique des images
+        fileToUpload = await compressImage(file);
+    } catch (e) {
+        console.warn("Image optimization skipped:", e);
+    }
+
+    const fileName = `${Date.now()}_${fileToUpload.name.replace(/\s/g, '_')}`;
+    const { data, error } = await supabase.storage.from(bucket).upload(fileName, fileToUpload);
     if (error) throw error;
     const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName);
     return publicUrl;
@@ -646,7 +680,7 @@ export const createBulkStalls = async (stalls: any[]) => {
         price: s.price,
         size: s.size,
         status: s.status || 'free',
-        product_type: s.productType,
+        product_type: s.product_type,
         health_status: s.healthStatus || 'healthy',
         compliance_score: s.complianceScore || 100,
         surface_area: s.surfaceArea,

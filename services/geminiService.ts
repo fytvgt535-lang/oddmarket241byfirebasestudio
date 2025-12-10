@@ -41,10 +41,9 @@ export const analyzeLocationWithMaps = async (lat: number, lng: number, contextL
       chunks.forEach((chunk: any) => {
         if (chunk.web?.uri && chunk.web?.title) {
           links.push({ title: chunk.web.title, uri: chunk.web.uri });
+        } else if (chunk.maps?.uri && chunk.maps?.title) {
+          links.push({ title: chunk.maps.title, uri: chunk.maps.uri });
         }
-        // Google Maps specific grounding often comes in specific structures, 
-        // but often falls back to web chunks for place links in the API response structure depending on version.
-        // We handle what's available.
       });
     }
 

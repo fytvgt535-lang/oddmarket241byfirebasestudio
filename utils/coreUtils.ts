@@ -44,3 +44,27 @@ export const generateRandomCoordinates = (centerLat = 0.3920, centerLng = 9.4540
         lng: centerLng + (Math.random() - 0.5) * variance
     };
 };
+
+/**
+ * Simule une géolocalisation IP Globale (Pays, Ville, IP)
+ * Utilisé pour le "Flux d'Activité" et "L'Oeil de Dieu".
+ */
+export const simulateGlobalLocation = () => {
+    const locations = [
+        { country: "Gabon", city: "Libreville", district: "Centre-Ville", ip: "197.241.12.45" },
+        { country: "Gabon", city: "Libreville", district: "Akanda", ip: "197.241.14.88" },
+        { country: "Gabon", city: "Owendo", district: "Port", ip: "197.241.10.12" },
+        { country: "Gabon", city: "Franceville", district: "Plateau", ip: "197.241.22.01" },
+        { country: "France", city: "Paris", district: "Île-de-France (VPN)", ip: "88.12.44.123" }, // Scenario VPN
+        { country: "USA", city: "New York", district: "Manhattan (Audit)", ip: "104.22.11.90" } // Scenario Audit international
+    ];
+    
+    // Weighted random (More likely to be Libreville)
+    const rand = Math.random();
+    let loc;
+    if (rand < 0.6) loc = locations[0];
+    else if (rand < 0.8) loc = locations[1];
+    else loc = locations[Math.floor(Math.random() * locations.length)];
+
+    return loc;
+};

@@ -1,8 +1,19 @@
 
 export type StallStatus = 'free' | 'occupied' | 'reserved';
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
-export type Language = 'fr' | 'fang' | 'mpongwe';
+export type Language = 'fr' | 'en' | 'fang' | 'mpongwe';
 export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
+
+// --- SCHEDULE SYSTEM ---
+export interface DaySchedule {
+  open: string;
+  close: string;
+  isOpen: boolean;
+}
+
+export interface MarketSchedule {
+  [key: string]: DaySchedule; // lundi, mardi, etc.
+}
 
 // --- AUDIT & SECURITY ---
 export interface AuditLog {
@@ -22,8 +33,8 @@ export interface AuditLog {
     location?: string;
     userAgent?: string;
   };
-  created_at?: string; // Format ISO string venant de la DB
-  createdAt: number;   // Timestamp JS
+  created_at?: string;
+  createdAt: number;
 }
 
 export interface UserActivity {
@@ -126,7 +137,7 @@ export interface User {
   kycDocument?: IdentityDocument;
   createdAt: number;
   lastLogin?: number;
-  lastSeenAt?: number; // New field for realtime status
+  lastSeenAt?: number;
   marketId?: string;
   stallId?: string;
   bio?: string;
@@ -165,6 +176,9 @@ export interface Market {
   baseRent: number;
   hasDeliveryService: boolean;
   description?: string;
+  lat?: number;
+  lng?: number;
+  schedule?: MarketSchedule;
 }
 
 export interface Expense {

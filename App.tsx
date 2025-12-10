@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { Loader2, LogOut, Store } from 'lucide-react';
+import { Loader2, LogOut, Store, Globe } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { supabase } from './supabaseClient';
 import LoginScreen from './components/Auth/LoginScreen';
@@ -22,9 +22,10 @@ const App: React.FC = () => {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  
+  // GLOBAL LANGUAGE STATE (Defaults to French)
+  const [currentLanguage, setCurrentLanguage] = useState<'fr' | 'en'>('fr');
 
-  // Hook Principal : Cerveau de l'application
-  // On récupère loadingStates pour savoir exactement ce qui charge
   const { isDataLoading, loadingStates, lazyLoaders, data, actions } = useAppData(session, currentUser);
 
   useEffect(() => {
@@ -43,6 +44,10 @@ const App: React.FC = () => {
   const fetchUserProfile = async (userId: string) => {
       const profile = await SupabaseService.getCurrentUserProfile(userId);
       setCurrentUser(profile);
+      // Set language from profile if available
+      if (profile?.preferences?.language && (profile.preferences.language === 'fr' || profile.preferences.language === 'en')) {
+          setCurrentLanguage(profile.preferences.language as any);
+      }
   };
 
   const handleLogin = async (email: string, pass: string) => {
@@ -107,7 +112,17 @@ const App: React.FC = () => {
                   <Store className={`w-6 h-6 ${currentUser.role === 'client' ? 'text-green-600' : 'text-white'}`}/>
                   <h1 className={`font-black ${currentUser.role === 'client' ? 'text-slate-900' : 'text-white'}`}>MarchéConnect</h1>
               </div>
-              <button onClick={handleSignOut} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
+              <div className="flex items-center gap-4">
+                  {/* LANGUAGE TOGGLE */}
+                  <button 
+                    onClick={() => setCurrentLanguage(prev => prev === 'fr' ? 'en' : 'fr')}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold uppercase transition-colors ${currentUser.role === 'client' ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                  >
+                      <Globe className="w-3 h-3"/>
+                      {currentLanguage === 'fr' ? 'Français' : 'English'}
+                  </button>
+                  <button onClick={handleSignOut} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
+              </div>
           </div>
       </header>
 
@@ -122,10 +137,11 @@ const App: React.FC = () => {
                     expenses={data.expenses} paymentPlans={data.paymentPlans} notifications={data.notifications} 
                     sanctions={data.sanctions} users={data.users} orders={data.orders} 
                     
-                    // NEW: Pass loading states down
+                    // NEW: Pass loading states & language down
                     loadingStates={loadingStates}
                     onLoadFinance={lazyLoaders.loadFinance}
                     onLoadUsers={lazyLoaders.loadUsers}
+                    currentLanguage={currentLanguage}
 
                     onSendSms={() => {}} onApprovePlan={() => {}} 
                     onAddMarket={actions.createMarket} 
