@@ -25,31 +25,22 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, activ
   const financials = useMemo(() => calculateStallDebt(stall, sanctions), [stall, sanctions]);
 
   return (
-    <Card className="animate-fade-in shadow-xl border-t-4 border-t-current" style={{ color: mode === 'collect' ? '#2563EB' : '#DC2626' }}>
-        {activeMission && (
-            <div className="bg-yellow-50 p-2 text-center border-b border-yellow-200">
-                <span className="text-xs font-bold text-yellow-800 flex items-center justify-center gap-2">
-                    <Target className="w-3 h-3"/> MISSION EN COURS : {activeMission.title}
-                </span>
-            </div>
-        )}
-        
-        <div className={`p-6 border-b border-gray-100 ${mode === 'collect' ? 'bg-blue-50' : 'bg-red-50'}`}>
-            <div className="flex justify-between items-start">
-                <div>
-                    <h3 className="text-3xl font-black text-gray-900">{stall.number}</h3>
-                    <p className="text-sm font-bold opacity-70 text-gray-600">{stall.occupantName || 'Inconnu'}</p>
+    <div className="space-y-6">
+        {mode === 'collect' && (
+            <Card className="animate-fade-in shadow-xl border-t-4 border-blue-600">
+                <div className="p-6 border-b border-gray-100 bg-blue-50">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="text-3xl font-black text-gray-900">{stall.number}</h3>
+                            <p className="text-sm font-bold opacity-70 text-gray-600">{stall.occupantName || 'Inconnu'}</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-xs font-bold uppercase text-gray-400">Dette Totale</p>
+                            <p className="text-xl font-black text-gray-900">{formatCurrency(financials.totalDebt)}</p>
+                        </div>
+                    </div>
                 </div>
-                <div className="text-right">
-                    <p className="text-xs font-bold uppercase text-gray-400">Dette Totale</p>
-                    <p className="text-xl font-black text-gray-900">{formatCurrency(financials.totalDebt)}</p>
-                </div>
-            </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-            {mode === 'collect' ? (
-                <>
+                <div className="p-6 space-y-6">
                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                         <div className="flex justify-between mb-2 text-sm">
                             <span className="text-gray-500">Loyer Mensuel</span>
@@ -72,29 +63,30 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, activ
                     <Button onClick={() => onPayment(amount)} isLoading={isProcessing} className="w-full py-4 text-lg bg-blue-600 hover:bg-blue-700">
                         Valider Encaissement
                     </Button>
-                </>
-            ) : (
-                <div className="space-y-4">
-                    <Select label="Motif de l'infraction" value={infractionId} onChange={e => setInfractionId(e.target.value)}>
-                        <option value="">Sélectionner dans le Code...</option>
-                        {PREDEFINED_INFRACTIONS.map(i => (
-                            <option key={i.id} value={i.id}>{i.label} - {formatCurrency(i.amount)}</option>
-                        ))}
-                    </Select>
-                    <div className="p-4 bg-red-50 rounded-xl text-red-800 text-sm italic">
-                        ⚠️ Une preuve photo sera demandée à l'étape suivante (Simulation).
-                    </div>
-                    <Button variant="danger" onClick={() => onSanction(infractionId)} disabled={!infractionId} isLoading={isProcessing} className="w-full py-4 text-lg">
-                        Émettre Sanction
-                    </Button>
+                    <Button variant="ghost" onClick={onCancel} className="w-full text-gray-400 hover:text-gray-600">Annuler</Button>
                 </div>
-            )}
-            
-            <Button variant="ghost" onClick={onCancel} className="w-full text-gray-400 hover:text-gray-600">
-                Annuler
-            </Button>
-        </div>
-    </Card>
+            </Card>
+        )}
+
+        {mode === 'sanction' && (
+            <div className="space-y-4">
+                {/* Only renders the form fields, Parent handles submission button for photo validation */}
+                <Select label="Motif de l'infraction" value={infractionId} onChange={e => setInfractionId(e.target.value)}>
+                    <option value="">Sélectionner dans le Code...</option>
+                    {PREDEFINED_INFRACTIONS.map(i => (
+                        <option key={i.id} value={i.id}>{i.label} - {formatCurrency(i.amount)}</option>
+                    ))}
+                </Select>
+                
+                {/* The Parent Component (AgentFieldTool) injects the Photo Upload UI here visually */}
+                
+                <Button variant="danger" onClick={() => onSanction(infractionId)} disabled={!infractionId} isLoading={isProcessing} className="w-full py-4 text-lg">
+                    Confirmer Sanction (Preuve Requise)
+                </Button>
+                <Button variant="ghost" onClick={onCancel} className="w-full text-gray-400 hover:text-gray-600">Annuler</Button>
+            </div>
+        )}
+    </div>
   );
 };
 

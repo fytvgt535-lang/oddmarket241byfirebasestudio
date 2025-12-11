@@ -101,6 +101,15 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = async () => {
+      // SECURITY CHECK: Anti-Fraud
+      if (currentUser?.role === 'agent' && currentUser?.agentStats?.isShiftActive) {
+          toast.error("INTERDIT: Vous devez terminer votre service avant de vous déconnecter.", { 
+              duration: 5000, 
+              style: { border: '2px solid red', padding: '16px', color: 'red' } 
+          });
+          return;
+      }
+
       await SupabaseService.signOutUser();
       setAuthView('login');
   };
@@ -149,7 +158,9 @@ const App: React.FC = () => {
                       <Globe className="w-3 h-3"/>
                       {currentLanguage === 'fr' ? 'Français' : 'English'}
                   </button>
-                  <button onClick={handleSignOut} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
+                  <button onClick={handleSignOut} className={`opacity-80 hover:opacity-100 ${currentUser.role === 'agent' && currentUser.agentStats?.isShiftActive ? 'opacity-30 cursor-not-allowed' : ''}`}>
+                      <LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/>
+                  </button>
               </div>
           </div>
       </header>
@@ -221,7 +232,14 @@ const App: React.FC = () => {
                     cashInHand={currentAgent.cashInHand} isShiftActive={currentAgent.isShiftActive} 
                     onCollectPayment={(id, amt) => SupabaseService.createTransaction({ marketId: 'm1', amount: amt, type: 'rent', provider: 'cash', stallId: id, collectedBy: currentUser.id }).then(() => {})} 
                     onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: 'm1', stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
-                    onShiftAction={()=>{}} 
+                    onShiftAction={(action) => {
+                        // Handle shift start/end logic
+                        if (action === 'start') {
+                            SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: true } });
+                        } else if (action === 'end') {
+                            SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: false } });
+                        }
+                    }} 
                     onUpdateMissionStatus={actions.updateMissionStatus}
                 />
             )}

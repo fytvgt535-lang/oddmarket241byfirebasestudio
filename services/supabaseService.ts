@@ -768,14 +768,15 @@ export const updateMissionStatus = async (id: string, status: string, report?: s
     if (error) throw error;
 };
 
-// NEW: Real-Time Agent Location Tracking
-export const updateAgentLocation = async (agentId: string, lat: number, lng: number, currentStats: any) => {
+// NEW: Real-Time Agent Location Tracking with District Context
+export const updateAgentLocation = async (agentId: string, lat: number, lng: number, district: string, currentStats: any) => {
     // Only update if moved significantly or if enough time passed to avoid DB spam
     // We update the 'agent_stats' JSONB column
     const newStats = {
         ...currentStats,
         lat,
         lng,
+        currentDistrict: district, // PERSISTENCE OF DISTRICT
         lastActive: Date.now()
     };
 
@@ -942,11 +943,14 @@ export const updateUserProfile = async (userId: string, updates: Partial<VendorP
      if (anyUpdates.favorites) payload.favorites = anyUpdates.favorites;
      if (anyUpdates.preferences) payload.preferences = anyUpdates.preferences;
      
+     // Agent Specifics
+     if (anyUpdates.agentStats) payload.agent_stats = anyUpdates.agentStats;
+
      const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
      if (error) throw error;
      
      // Auto log profile updates (except repetitive ones like last_seen)
-     if (!anyUpdates.lastSeenAt) {
+     if (!anyUpdates.lastSeenAt && !anyUpdates.agentStats) { // Avoid logging every GPS ping
          logSystemAction(userId, 'UPDATE_PROFILE', userId, payload, 'Mise à jour profil utilisateur');
      }
 };

@@ -179,6 +179,7 @@ export interface User {
       lastActive: number;
       lat?: number; // Real-time Latitude
       lng?: number; // Real-time Longitude
+      authorizedZones?: string[]; // Geofencing
   };
 }
 
@@ -292,6 +293,7 @@ export interface Agent {
   isShiftActive: boolean;
   lat?: number;
   lng?: number;
+  authorizedZones?: string[]; // Added
   logs: AgentLog[];
 }
 
