@@ -4,9 +4,6 @@ import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sancti
 import * as SupabaseService from '../services/supabaseService';
 import toast from 'react-hot-toast';
 
-// Durée de validité du cache en millisecondes (5 minutes)
-const CACHE_TTL = 5 * 60 * 1000;
-
 const fetchSafe = async <T>(promise: Promise<T>, fallback: T, context: string): Promise<T> => {
     try {
         return await promise;
@@ -18,6 +15,7 @@ const fetchSafe = async <T>(promise: Promise<T>, fallback: T, context: string): 
 
 export const useAppData = (session: any, currentUser: User | null) => {
   // Global loading (for initial app mount only)
+  // We default this to FALSE faster if we have cache, but here we set to true initially.
   const [isGlobalLoading, setIsGlobalLoading] = useState(true);
   
   // Granular Loading States
@@ -26,30 +24,29 @@ export const useAppData = (session: any, currentUser: User | null) => {
       users: false,
       products: false,
       orders: false,
-      missions: false // Added mission loading state
+      missions: false
   });
 
-  // --- STATE CORE (Structurel - Chargé au démarrage) ---
+  // --- STATE CORE ---
   const [markets, setMarkets] = useState<Market[]>([]); 
-  const [stalls, setStalls] = useState<Stall[]>([]); 
+  const [stalls, setStalls] = useState<Stall[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // --- STATE LAZY (Données lourdes) ---
+  // --- STATE LAZY ---
   const [products, setProducts] = useState<Product[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [financialStats, setFinancialStats] = useState({ totalRevenue: 0, totalExpenses: 0, netBalance: 0 });
   const [expenses, setExpenses] = useState<Expense[]>([]); 
   const [orders, setOrders] = useState<ClientOrder[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>([]); 
   const [sanctions, setSanctions] = useState<Sanction[]>([]);
-  const [missions, setMissions] = useState<Mission[]>([]); // New missions state
+  const [missions, setMissions] = useState<Mission[]>([]); 
   
-  // Placeholders
   const [reports] = useState<any[]>([]);
   const [receipts] = useState<any[]>([]);
   const [paymentPlans] = useState<any[]>([]);
   
-  // Agents are derived from users
+  // Agents derived from users
   const agents = users
     .filter(u => u.role === 'agent')
     .map(u => ({
@@ -57,20 +54,15 @@ export const useAppData = (session: any, currentUser: User | null) => {
         userId: u.id,
         name: u.name,
         marketId: u.marketId || 'm1',
-        role: 'collector' as const, // Default for now
+        role: 'collector' as const, 
         performanceScore: u.agentStats?.performanceScore || 85,
         lastActive: u.lastSeenAt || Date.now(),
         cashInHand: u.agentStats?.cashInHand || 0,
         isShiftActive: !!u.agentStats?.isShiftActive,
-        logs: [] // Logs would be fetched separately if needed
+        logs: []
     }));
 
-  // --- CACHE MANAGEMENT ---
-  // Stores timestamp of last successful fetch for each segment
-  const lastFetchRef = useRef<{ [key: string]: number }>({});
-  const subscriptionsRef = useRef<any[]>([]);
-
-  // --- ACTIONS (Optimistic UI Patterns) ---
+  // --- ACTIONS ---
   const actions = {
       createMarket: async (marketData: any) => {
           try {
@@ -91,17 +83,13 @@ export const useAppData = (session: any, currentUser: User | null) => {
       },
       createStall: async (stallData: any) => {
           try {
-              const newStall = await SupabaseService.createStall(stallData);
-              setStalls(prev => [...prev, newStall]);
+              await SupabaseService.createStall(stallData);
               toast.success("Étal ajouté");
           } catch (e: any) { toast.error(e.message); }
       },
       bulkCreateStalls: async (stallsData: any[]) => {
           try {
               await SupabaseService.createBulkStalls(stallsData);
-              // Force refresh logic would go here
-              const freshStalls = await SupabaseService.fetchStalls();
-              setStalls(freshStalls);
               toast.success("Génération terminée");
           } catch (e: any) { toast.error(e.message); }
       },
@@ -113,7 +101,6 @@ export const useAppData = (session: any, currentUser: User | null) => {
           try {
               const newExp = await SupabaseService.createExpense(expenseData);
               setExpenses(prev => [newExp, ...prev]);
-              // Recalcul simple des stats locales pour éviter un reload
               setFinancialStats(prev => ({ 
                   ...prev, 
                   totalExpenses: prev.totalExpenses + newExp.amount, 
@@ -142,7 +129,6 @@ export const useAppData = (session: any, currentUser: User | null) => {
       },
       createOrder: async (orderData: any) => {
           await SupabaseService.createOrder(orderData);
-          // Realtime will pick it up
       },
       updateOrderStatus: async (orderId: string, status: any) => {
           setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
@@ -152,7 +138,6 @@ export const useAppData = (session: any, currentUser: User | null) => {
           setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...updates } : u));
           await SupabaseService.adminUpdateUserStatus(userId, updates);
       },
-      // --- NEW AGENT ACTIONS ---
       assignMission: async (missionData: any) => {
           try {
               const newMission = await SupabaseService.createMission(missionData);
@@ -166,7 +151,6 @@ export const useAppData = (session: any, currentUser: User | null) => {
       validateCashDrop: async (agentId: string, amount: number) => {
           try {
               await SupabaseService.validateAgentDeposit(agentId, amount);
-              // Optimistic update of agent cash in users list
               setUsers(prev => prev.map(u => {
                   if (u.id === agentId && u.agentStats) {
                       return { ...u, agentStats: { ...u.agentStats, cashInHand: 0 } };
@@ -177,49 +161,46 @@ export const useAppData = (session: any, currentUser: User | null) => {
       }
   };
 
-  // --- LAZY LOADERS (Smart Caching) ---
-  
-  const lazyLoaders = {
-      loadFinance: async (forceRefresh = false) => {
-          const now = Date.now();
-          if (!forceRefresh && lastFetchRef.current['finance'] && (now - lastFetchRef.current['finance'] < CACHE_TTL)) {
-              return; // Cache hit
-          }
+  // --- LAZY LOADERS (With simple deduplication) ---
+  const loadingRefs = useRef({ finance: false, users: false, missions: false });
 
+  const lazyLoaders = {
+      loadFinance: async () => {
+          if (loadingRefs.current.finance) return;
+          loadingRefs.current.finance = true;
           setLoadingStates(prev => ({ ...prev, finance: true }));
+          
           try {
+              // Parallel Fetch for Speed
               const [trans, exps, stats] = await Promise.all([
-                  fetchSafe(SupabaseService.fetchTransactions(1, 200), { transactions: [], count: 0 }, 'Transactions'),
+                  fetchSafe(SupabaseService.fetchTransactions(1, 50), { transactions: [], count: 0 }, 'Transactions'),
                   fetchSafe(SupabaseService.fetchExpenses(), [], 'Dépenses'),
                   fetchSafe(SupabaseService.fetchFinancialStats(), { totalRevenue: 0, totalExpenses: 0, netBalance: 0 }, 'Stats')
               ]);
               setRecentTransactions(trans.transactions);
               setExpenses(exps);
               setFinancialStats(stats);
-              lastFetchRef.current['finance'] = now;
           } finally {
               setLoadingStates(prev => ({ ...prev, finance: false }));
+              loadingRefs.current.finance = false;
           }
       },
 
-      loadUsers: async (forceRefresh = false) => {
-          const now = Date.now();
-          if (!forceRefresh && lastFetchRef.current['users'] && (now - lastFetchRef.current['users'] < CACHE_TTL)) return;
-
+      loadUsers: async () => {
+          if (loadingRefs.current.users) return;
+          loadingRefs.current.users = true;
           setLoadingStates(prev => ({ ...prev, users: true }));
+          
           try {
-              const usersData = await fetchSafe(SupabaseService.fetchProfiles(), [], 'Utilisateurs');
-              setUsers(usersData);
-              lastFetchRef.current['users'] = now;
+              const { data } = await fetchSafe(SupabaseService.fetchProfiles({ limit: 50 }), { data: [], count: 0 }, 'Utilisateurs');
+              setUsers(data);
           } finally {
               setLoadingStates(prev => ({ ...prev, users: false }));
+              loadingRefs.current.users = false;
           }
       },
 
-      loadProducts: async (forceRefresh = false) => {
-          const now = Date.now();
-          if (!forceRefresh && lastFetchRef.current['products'] && (now - lastFetchRef.current['products'] < CACHE_TTL)) return;
-
+      loadProducts: async () => {
           setLoadingStates(prev => ({ ...prev, products: true }));
           try {
               const prods = await fetchSafe(SupabaseService.fetchProducts(), [], 'Produits');
@@ -228,125 +209,66 @@ export const useAppData = (session: any, currentUser: User | null) => {
               } else {
                   setProducts(prods);
               }
-              lastFetchRef.current['products'] = now;
           } finally {
               setLoadingStates(prev => ({ ...prev, products: false }));
           }
       },
 
-      loadOrders: async (forceRefresh = false) => {
-          const now = Date.now();
-          if (!forceRefresh && lastFetchRef.current['orders'] && (now - lastFetchRef.current['orders'] < CACHE_TTL)) return;
-
+      loadOrders: async () => {
           setLoadingStates(prev => ({ ...prev, orders: true }));
           try {
               const ords = await fetchSafe(SupabaseService.fetchOrders(), [], 'Commandes');
               setOrders(ords);
-              lastFetchRef.current['orders'] = now;
           } finally {
               setLoadingStates(prev => ({ ...prev, orders: false }));
           }
       },
 
-      loadMissions: async (forceRefresh = false) => {
-          const now = Date.now();
-          if (!forceRefresh && lastFetchRef.current['missions'] && (now - lastFetchRef.current['missions'] < CACHE_TTL)) return;
-          
+      loadMissions: async () => {
+          if (loadingRefs.current.missions) return;
+          loadingRefs.current.missions = true;
           setLoadingStates(prev => ({ ...prev, missions: true }));
           try {
               const m = await fetchSafe(SupabaseService.fetchMissions(), [], 'Missions');
               setMissions(m);
-              lastFetchRef.current['missions'] = now;
           } finally {
               setLoadingStates(prev => ({ ...prev, missions: false }));
+              loadingRefs.current.missions = false;
           }
       }
   };
 
-  // --- INITIAL CORE LOAD ---
+  // --- INITIAL CORE LOAD (Ultra-Minimal) ---
   const loadCoreData = useCallback(async () => {
     if (!session || !currentUser) { 
         setIsGlobalLoading(false); 
         return; 
     }
     
+    // Immediate unlock for UX, fetch in background
+    setIsGlobalLoading(true);
+
     try {
-        const [marketsData, stallsData] = await Promise.all([
-            SupabaseService.fetchMarkets(),
-            fetchSafe(SupabaseService.fetchStalls(), [], 'Étals')
-        ]);
-        
+        const marketsData = await SupabaseService.fetchMarkets();
         setMarkets(marketsData);
-        setStalls(stallsData);
-
-        // Pre-fetch based on role importance
+        
+        // Only load essential context based on role
         if (currentUser.role === 'vendor') {
-            lazyLoaders.loadProducts(); // Vendor needs products immediately
+            lazyLoaders.loadProducts(); 
         }
-        if (currentUser.role === 'agent') {
-            lazyLoaders.loadMissions(); // Agent needs missions immediately
-        }
-
     } catch (error: any) {
         console.error("Core Load Error:", error);
-        toast.error("Mode hors-ligne partiel.");
     } finally {
+        // FAST UNLOCK
         setIsGlobalLoading(false);
     }
   }, [session, currentUser]);
 
   useEffect(() => { loadCoreData(); }, [loadCoreData]);
 
-  // --- REALTIME SUBSCRIPTIONS (Invalidate Cache on Change) ---
-  useEffect(() => {
-    if (!session || !currentUser) return;
-
-    subscriptionsRef.current.forEach(sub => sub.unsubscribe());
-    subscriptionsRef.current = [];
-
-    // Quand une donnée change, on invalide le cache pour forcer un re-fetch au prochain accès
-    const invalidateCache = (segment: string) => {
-        delete lastFetchRef.current[segment];
-    };
-
-    const subscribe = (table: string, segment: string, callback?: () => void) => {
-        const channelId = `lazy_${table}_${currentUser.id}`;
-        const sub = SupabaseService.subscribeToTable(table, () => {
-            invalidateCache(segment);
-            if (callback) callback();
-        }, channelId);
-        subscriptionsRef.current.push(sub);
-    };
-
-    // Global Critical Data - Always reload
-    subscribe('markets', 'core', loadCoreData);
-    subscribe('stalls', 'core', loadCoreData);
-
-    // Contextual Data
-    if (currentUser.role === 'admin') {
-        subscribe('transactions', 'finance');
-        subscribe('expenses', 'finance');
-        subscribe('profiles', 'users'); // Will update agent list automatically
-        subscribe('missions', 'missions', () => lazyLoaders.loadMissions(true));
-    } else if (currentUser.role === 'vendor') {
-        subscribe('products', 'products', () => lazyLoaders.loadProducts(true)); // Auto refresh for own products
-        subscribe('client_orders', 'orders', () => {
-            toast.success("Mise à jour commande !");
-            lazyLoaders.loadOrders(true);
-        });
-    } else if (currentUser.role === 'agent') {
-        subscribe('missions', 'missions', () => lazyLoaders.loadMissions(true)); // Agent listens for new missions
-    }
-
-    return () => {
-        subscriptionsRef.current.forEach(sub => sub.unsubscribe());
-        subscriptionsRef.current = [];
-    };
-  }, [session, currentUser, loadCoreData]);
-
   return {
-    isDataLoading: isGlobalLoading, // Only global initial load
-    loadingStates, // Granular states for UI spinners
+    isDataLoading: isGlobalLoading, 
+    loadingStates, 
     loadData: loadCoreData, 
     lazyLoaders,
     actions,

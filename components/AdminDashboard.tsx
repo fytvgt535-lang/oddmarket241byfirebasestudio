@@ -11,6 +11,7 @@ import AgentManager from './admin/AgentManager';
 import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { t } from '../services/translations';
 import { simulateGlobalLocation, formatCurrency } from '../utils/coreUtils';
+import { Skeleton } from './ui/Skeleton';
 
 interface AdminDashboardProps {
   markets: Market[];
@@ -66,32 +67,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
+      // Trigger lazy loads based on tab, but don't block UI
       if (activeTab === 'finance' || activeTab === 'overview') onLoadFinance && onLoadFinance();
       if (activeTab === 'users' || activeTab === 'audit' || activeTab === 'agents') onLoadUsers && onLoadUsers();
-      if (activeTab === 'agents') onLoadMissions && onLoadMissions(); // Fetch missions when active
-  }, [activeTab, onLoadFinance, onLoadUsers, onLoadMissions]);
+      if (activeTab === 'agents') onLoadMissions && onLoadMissions();
+  }, [activeTab]); // Depend only on activeTab to avoid loop
 
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
   const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
-  const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
   
-  // Today's revenue calculation
-  const todayRevenue = useMemo(() => {
+  // Memoize heavy calculations
+  const { totalRevenue, todayRevenue, collectionRate, occupancyRate } = useMemo(() => {
+      const totRev = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+      
       const startOfDay = new Date();
       startOfDay.setHours(0,0,0,0);
-      return filteredTransactions
+      const todRev = filteredTransactions
         .filter(t => t.date >= startOfDay.getTime())
         .reduce((acc, curr) => acc + curr.amount, 0);
-  }, [filteredTransactions]);
 
-  const potentialRevenue = stalls.reduce((acc, s) => acc + s.price, 0);
-  const collectionRate = Math.round((totalRevenue / (potentialRevenue > 0 ? potentialRevenue : 1)) * 100) || 0;
+      const potRev = stalls.reduce((acc, s) => acc + s.price, 0);
+      const colRate = Math.round((totRev / (potRev > 0 ? potRev : 1)) * 100) || 0;
+      
+      const occStalls = stalls.filter(s => s.status === 'occupied').length;
+      const totStalls = stalls.length;
+      const occRate = totStalls > 0 ? Math.round((occStalls / totStalls) * 100) : 0;
+
+      return { totalRevenue: totRev, todayRevenue: todRev, collectionRate: colRate, occupancyRate: occRate };
+  }, [filteredTransactions, stalls]);
+
   const unreadNotifs = notifications.filter(n => !n.read).length;
   
-  const occupiedStalls = stalls.filter(s => s.status === 'occupied').length;
-  const totalStalls = stalls.length;
-  const occupancyRate = totalStalls > 0 ? Math.round((occupiedStalls / totalStalls) * 100) : 0;
-
   // Generate enriched activity feed with geolocation
   const activityFeed = useMemo(() => {
       return [
@@ -99,6 +105,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ...orders.map(o => ({ ...o, kind: 'order' as const, amount: o.totalAmount, location: simulateGlobalLocation() }))
       ].sort((a, b) => b.date - a.date).slice(0, 15); 
   }, [filteredTransactions, orders]);
+
+  const isLoadingFinance = loadingStates?.finance;
 
   return (
     <div className="space-y-6 relative">
@@ -151,12 +159,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button onClick={() => setActiveTab('users')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'users' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'}`}>
               <Users className="w-4 h-4" /> {t(currentLanguage, 'tab_users')}
-              {loadingStates?.users && <Loader2 className="w-3 h-3 animate-spin"/>}
           </button>
           <button onClick={() => setActiveTab('space')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'space' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500'}`}><LayoutGrid className="w-4 h-4" /> {t(currentLanguage, 'tab_space')}</button>
           <button onClick={() => setActiveTab('finance')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'finance' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500'}`}>
               <DollarSign className="w-4 h-4" /> {t(currentLanguage, 'tab_finance')}
-              {loadingStates?.finance && <Loader2 className="w-3 h-3 animate-spin"/>}
           </button>
           <button onClick={() => setActiveTab('markets')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'markets' ? 'border-slate-800 text-slate-900' : 'border-transparent text-gray-500'}`}><Settings className="w-4 h-4" /> {t(currentLanguage, 'tab_markets')}</button>
           <button onClick={() => setActiveTab('audit')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'audit' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}><Shield className="w-4 h-4" /> {t(currentLanguage, 'tab_audit')}</button>
@@ -175,34 +181,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="flex items-center gap-4">
                     <span>Build: v2.4.1 (Stable)</span>
-                    <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {users.length}</span>
+                    <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {loadingStates?.users ? '...' : users.length}</span>
                 </div>
             </div>
 
-            {/* MAIN KPI GRID */}
+            {/* MAIN KPI GRID - WITH SKELETONS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_revenue_today')}</p>
-                            <h3 className="text-2xl font-black text-gray-800">{formatCurrency(todayRevenue)}</h3>
+                            {isLoadingFinance ? <Skeleton width={120} height={32} className="mb-1"/> : <h3 className="text-2xl font-black text-gray-800">{formatCurrency(todayRevenue)}</h3>}
                         </div>
                         <div className="p-2 bg-green-100 text-green-600 rounded-lg"><TrendingUp className="w-5 h-5"/></div>
                     </div>
-                    <div className="mt-4 w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="bg-green-500 h-full" style={{ width: '65%' }}></div>
-                    </div>
+                    {isLoadingFinance ? <Skeleton width="100%" height={4} className="mt-4"/> : (
+                        <div className="mt-4 w-full bg-gray-100 h-1 rounded-full overflow-hidden">
+                            <div className="bg-green-500 h-full" style={{ width: '65%' }}></div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'recovery_rate')}</p>
-                            <h3 className={`text-2xl font-black ${collectionRate < 70 ? 'text-red-500' : 'text-blue-600'}`}>{collectionRate}%</h3>
+                            {isLoadingFinance ? <Skeleton width={80} height={32} className="mb-1"/> : <h3 className={`text-2xl font-black ${collectionRate < 70 ? 'text-red-500' : 'text-blue-600'}`}>{collectionRate}%</h3>}
                         </div>
                         <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><DollarSign className="w-5 h-5"/></div>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">Target mensuel: {formatCurrency(potentialRevenue)}</p>
+                    <p className="text-xs text-gray-400 mt-2">Target mensuel calculé</p>
                 </div>
 
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
@@ -213,11 +221,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                         <div className="p-2 bg-purple-100 text-purple-600 rounded-lg"><LayoutGrid className="w-5 h-5"/></div>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">{occupiedStalls} / {totalStalls} {t(currentLanguage, 'occupied')}</p>
+                    <p className="text-xs text-gray-400 mt-2">{t(currentLanguage, 'occupied')}</p>
                 </div>
 
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between relative overflow-hidden">
-                    {reports.filter(r => r.status === 'pending').length > 0 && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-ping m-2"></div>}
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_security_alert')}</p>
@@ -262,7 +269,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <div className="mt-4">
                                         <div className="flex justify-between text-xs font-bold mb-1">
                                             <span>Rev.</span>
-                                            <span>{mRate.toFixed(0)}%</span>
+                                            {isLoadingFinance ? <Skeleton width={30} height={10}/> : <span>{mRate.toFixed(0)}%</span>}
                                         </div>
                                         <div className="w-full bg-white h-2 rounded-full overflow-hidden">
                                             <div className={`h-full ${barColor}`} style={{ width: `${Math.min(mRate, 100)}%` }}></div>
@@ -288,14 +295,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </h3>
                         <span className="text-[10px] text-slate-500 font-mono">LIVE</span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-0 font-mono text-xs">
-                        {loadingStates?.finance ? (
-                            <div className="flex justify-center items-center h-full text-slate-600"><Loader2 className="w-6 h-6 animate-spin"/></div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
+                        {isLoadingFinance ? (
+                            Array.from({length: 6}).map((_, i) => (
+                                <div key={i} className="flex gap-3 items-center">
+                                    <Skeleton variant="circular" width={8} height={8} className="bg-slate-700"/>
+                                    <div className="flex-1 space-y-2">
+                                        <Skeleton width="40%" height={10} className="bg-slate-700"/>
+                                        <Skeleton width="80%" height={10} className="bg-slate-800"/>
+                                    </div>
+                                </div>
+                            ))
                         ) : activityFeed.length === 0 ? (
                             <p className="text-slate-600 text-center py-10">{t(currentLanguage, 'feed_waiting')}</p>
                         ) : (
                             activityFeed.map((item: any, idx) => (
-                                <div key={idx} className="mb-3 pl-3 border-l border-slate-700 relative">
+                                <div key={idx} className="pl-3 border-l border-slate-700 relative animate-fade-in">
                                     <div className={`absolute -left-[5px] top-0 w-2 h-2 rounded-full ${item.kind === 'transaction' ? 'bg-blue-500' : 'bg-green-500'}`}></div>
                                     <div className="flex justify-between text-slate-400 mb-0.5">
                                         <span>{new Date(item.date).toLocaleTimeString()}</span>

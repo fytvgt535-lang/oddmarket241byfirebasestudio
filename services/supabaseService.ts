@@ -435,7 +435,60 @@ export const deleteMarket = async (id: string) => {
     if (user) logSystemAction(user.id, 'DELETE_MARKET', id, {}, `Suppression marché`);
 };
 
-// STALL MANAGEMENT
+// STALL MANAGEMENT - PAGINATED
+export const fetchStalls = async (params: { 
+    page?: number, 
+    limit?: number, 
+    marketId?: string, 
+    status?: string, 
+    search?: string 
+} = {}): Promise<{ data: Stall[], count: number }> => {
+    const page = params.page || 1;
+    const limit = params.limit || 50;
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    let query = supabase.from('stalls').select('*', { count: 'exact' });
+
+    if (params.marketId && params.marketId !== 'all') {
+        query = query.eq('market_id', params.marketId);
+    }
+    if (params.status && params.status !== 'all') {
+        if (params.status === 'warning' || params.status === 'critical') {
+            query = query.eq('health_status', params.status);
+        } else {
+            // For 'occupied' or 'free' which are regular status
+            query = query.eq('status', params.status);
+        }
+    }
+    if (params.search) {
+        query = query.or(`number.ilike.%${params.search}%,occupant_name.ilike.%${params.search}%`);
+    }
+
+    const { data, count, error } = await query.range(start, end).order('number', { ascending: true });
+    
+    if (error) throw error;
+
+    const mappedStalls = (data || []).map((s: any) => ({
+        ...s,
+        occupantId: s.occupant_id,
+        occupantName: s.occupant_name,
+        marketId: s.market_id,
+        productType: s.product_type,
+        lastPaymentDate: s.last_payment_date ? new Date(s.last_payment_date).getTime() : undefined,
+        healthStatus: s.health_status,
+        complianceScore: s.compliance_score,
+        coordinates: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined,
+        activityLog: s.details?.activityLog || [],
+        documents: s.details?.documents || [],
+        employees: s.details?.employees || [],
+        messages: s.details?.messages || [],
+        surfaceArea: s.surface_area
+    }));
+
+    return { data: mappedStalls, count: count || 0 };
+};
+
 export const createStall = async (s: any) => { 
     const payload = {
         market_id: s.marketId,
@@ -505,29 +558,17 @@ export const fetchMarkets = async (): Promise<Market[]> => {
     return (data || []).map(mapMarketFromDB);
 };
 
-export const fetchStalls = async (): Promise<Stall[]> => {
-    const { data, error } = await supabase.from('stalls').select('*');
-    if (error) throw error;
-    return (data || []).map((s: any) => ({
-        ...s,
-        occupantId: s.occupant_id,
-        occupantName: s.occupant_name,
-        marketId: s.market_id,
-        productType: s.product_type,
-        lastPaymentDate: s.last_payment_date ? new Date(s.last_payment_date).getTime() : undefined,
-        healthStatus: s.health_status,
-        complianceScore: s.compliance_score,
-        coordinates: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined,
-        activityLog: s.details?.activityLog || [],
-        documents: s.details?.documents || [],
-        employees: s.details?.employees || [],
-        messages: s.details?.messages || [],
-        surfaceArea: s.surface_area
-    }));
-};
+export const fetchProducts = async (params: { stallId?: string; search?: string; page?: number; limit?: number } = {}): Promise<Product[]> => {
+    const page = params.page || 1;
+    const limit = params.limit || 50;
+    
+    let query = supabase.from('products').select('*');
+    if (params.stallId) query = query.eq('stall_id', params.stallId);
+    if (params.search) query = query.ilike('name', `%${params.search}%`);
+    
+    query = query.range((page - 1) * limit, page * limit - 1);
 
-export const fetchProducts = async (): Promise<Product[]> => {
-    const { data, error } = await supabase.from('products').select('*');
+    const { data, error } = await query;
     if (error) throw error;
     return (data || []).map((p: any) => ({
         ...p,
@@ -571,7 +612,7 @@ export const fetchExpenses = async (): Promise<Expense[]> => {
 };
 
 export const fetchOrders = async (): Promise<ClientOrder[]> => {
-    const { data, error } = await supabase.from('client_orders').select('*');
+    const { data, error } = await supabase.from('client_orders').select('*').limit(50).order('created_at', { ascending: false });
     if (error) throw error;
     return (data || []).map((o: any) => ({
         ...o,
@@ -587,15 +628,53 @@ export const fetchOrders = async (): Promise<ClientOrder[]> => {
     }));
 };
 
-export const fetchProfiles = async (): Promise<User[]> => {
-    const { data, error } = await supabase.from('profiles').select('*');
+// USER MANAGEMENT - PAGINATED
+export const fetchProfiles = async (params: { page?: number; limit?: number; role?: string; search?: string } = {}): Promise<{ data: User[]; count: number }> => {
+    const page = params.page || 1;
+    const limit = params.limit || 50;
+    
+    let query = supabase.from('profiles').select('*', { count: 'exact' });
+    
+    if (params.role && params.role !== 'all') query = query.eq('role', params.role);
+    if (params.search) query = query.or(`name.ilike.%${params.search}%,email.ilike.%${params.search}%`);
+    
+    query = query.range((page - 1) * limit, page * limit - 1);
+
+    const { data, count, error } = await query;
     if (error) throw error;
-    return (data || []).map(mapProfile);
+    
+    return { data: (data || []).map(mapProfile), count: count || 0 };
+};
+
+// GLOBAL STATS AGGREGATION (OPTIMIZED FOR DASHBOARD)
+export const fetchGlobalStats = async () => {
+    // Uses lightweight count queries instead of fetching all rows
+    const { count: stallsCount } = await supabase.from('stalls').select('*', { count: 'exact', head: true });
+    const { count: occupiedCount } = await supabase.from('stalls').select('*', { count: 'exact', head: true }).eq('status', 'occupied');
+    
+    // For revenue, we might need a custom RPC or a separate stats table for city-scale
+    // Fallback: fetch aggregation via RPC if exists, or simple query on recent transactions
+    let totalRevenue = 0;
+    try {
+        const { data } = await supabase.rpc('get_total_revenue'); // Hypothetical RPC
+        totalRevenue = data || 0;
+    } catch {
+        // Fallback: Fetch last 1000 txs sum
+        const { data: txs } = await supabase.from('transactions').select('amount').limit(1000);
+        totalRevenue = (txs || []).reduce((acc: any, t: any) => acc + t.amount, 0);
+    }
+
+    return {
+        stallsCount: stallsCount || 0,
+        occupiedCount: occupiedCount || 0,
+        totalRevenue
+    };
 };
 
 export const fetchFinancialStats = async () => {
-    const { data: txs } = await supabase.from('transactions').select('amount');
-    const { data: exps } = await supabase.from('expenses').select('amount');
+    // This is expensive on city-scale. Should be pre-calculated in DB.
+    const { data: txs } = await supabase.from('transactions').select('amount').limit(500);
+    const { data: exps } = await supabase.from('expenses').select('amount').limit(500);
     const totalRevenue = (txs || []).reduce((acc: any, t: any) => acc + t.amount, 0);
     const totalExpenses = (exps || []).reduce((acc: any, e: any) => acc + e.amount, 0);
     return { totalRevenue, totalExpenses, netBalance: totalRevenue - totalExpenses };

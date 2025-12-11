@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
-import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { Stall, Market } from '../../types';
 import toast from 'react-hot-toast';
 import StallDigitalTwin from '../StallDigitalTwin';
@@ -8,19 +8,28 @@ import { Button } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
 import { Card, CardContent } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { fetchStalls } from '../../services/supabaseService';
 
 interface StallManagerProps {
-  stalls: Stall[];
+  stalls: Stall[]; // Legacy prop, used for stats if small, else ignored
   markets: Market[];
   onCreateStall: (stall: Omit<Stall, 'id'>) => void;
   onBulkCreateStalls: (stalls: Omit<Stall, 'id'>[]) => void;
   onDeleteStall: (id: string) => void;
+  currentLanguage: string;
 }
 
-const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
+const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
+  // Server-side State
+  const [paginatedStalls, setPaginatedStalls] = useState<Stall[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  
+  // Filters
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical' | 'occupied' | 'free'>('all');
   const [filterMarketId, setFilterMarketId] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   // Modals
@@ -33,14 +42,31 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
   const [newForm, setNewForm] = useState({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: 'divers' });
   const [bulkForm, setBulkForm] = useState({ marketId: '', zone: '', prefix: '', startNumber: '1', count: '10', price: '', size: 'S', productType: 'divers' });
 
-  const filteredStalls = useMemo(() => {
-      return stalls.filter(s => {
-          const matchSearch = s.number.toLowerCase().includes(search.toLowerCase()) || s.occupantName?.toLowerCase().includes(search.toLowerCase());
-          const matchStatus = filterStatus === 'all' || s.healthStatus === filterStatus;
-          const matchMarket = filterMarketId === 'all' || s.marketId === filterMarketId;
-          return matchSearch && matchStatus && matchMarket;
-      });
-  }, [stalls, search, filterStatus, filterMarketId]);
+  // Fetch Logic
+  const loadStalls = async () => {
+      setLoading(true);
+      try {
+          const { data, count } = await fetchStalls({
+              page,
+              limit: 20, // Page size
+              marketId: filterMarketId,
+              status: filterStatus,
+              search: search
+          });
+          setPaginatedStalls(data);
+          setTotalCount(count);
+      } catch (e: any) {
+          toast.error("Erreur chargement: " + e.message);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  useEffect(() => {
+      // Debounce search
+      const timer = setTimeout(() => loadStalls(), 500);
+      return () => clearTimeout(timer);
+  }, [page, filterMarketId, filterStatus, search]);
 
   const getMarketName = (id: string) => markets.find(m => m.id === id)?.name || 'Marché Inconnu';
 
@@ -64,7 +90,8 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
       });
       setIsCreateOpen(false);
       setNewForm({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: 'divers' });
-      toast.success("Étal créé !");
+      // Reload happens via optimistic update in hook or manual refresh
+      setTimeout(loadStalls, 1000);
   };
 
   const handleBulkCreate = (e: React.FormEvent) => {
@@ -95,7 +122,7 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
       }
       onBulkCreateStalls(stallsToCreate);
       setIsBulkOpen(false);
-      toast.success(`${stallsToCreate.length} étals générés !`);
+      setTimeout(loadStalls, 1000);
   };
 
   const handleDelete = () => {
@@ -103,6 +130,7 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
           onDeleteStall(deleteId);
           setDeleteId(null);
           toast.success("Étal supprimé.");
+          setTimeout(loadStalls, 500);
       }
   };
 
@@ -111,7 +139,7 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
         <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-orange-50/50">
             <div>
                 <h3 className="text-lg font-bold text-orange-900 flex items-center gap-2"><LayoutGrid className="w-5 h-5"/> Gestion du Parc Immobilier</h3>
-                <p className="text-sm text-orange-700">Gérez les étals, les zones et les attributions.</p>
+                <p className="text-sm text-orange-700">Total: {totalCount} étals référencés.</p>
             </div>
             <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setIsBulkOpen(true)} leftIcon={Copy}>Générer Série</Button>
@@ -123,18 +151,19 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
             {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4 mb-6">
                 <div className="flex-1">
-                    <Input placeholder="Rechercher étal, occupant..." value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={Search} />
+                    <Input placeholder="Rechercher étal, occupant..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} leftIcon={Search} />
                 </div>
                 <div className="w-48">
-                    <Select value={filterMarketId} onChange={(e) => setFilterMarketId(e.target.value)}>
+                    <Select value={filterMarketId} onChange={(e) => { setFilterMarketId(e.target.value); setPage(1); }}>
                         <option value="all">Tous les marchés</option>
                         {markets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </Select>
                 </div>
                 <div className="w-48">
-                    <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
+                    <Select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value as any); setPage(1); }}>
                         <option value="all">Tous les statuts</option>
-                        <option value="healthy">Sain (Vert)</option>
+                        <option value="occupied">Loué</option>
+                        <option value="free">Libre</option>
                         <option value="warning">Avertissement</option>
                         <option value="critical">Critique (Rouge)</option>
                     </Select>
@@ -146,9 +175,11 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
             </div>
 
             {/* List/Grid View */}
-            {viewMode === 'grid' ? (
+            {loading ? (
+                <div className="p-20 text-center"><Loader2 className="w-10 h-10 animate-spin mx-auto text-orange-500"/></div>
+            ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {filteredStalls.map(stall => (
+                    {paginatedStalls.map(stall => (
                         <div key={stall.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-all group relative">
                             <div className={`h-2 ${stall.healthStatus === 'healthy' ? 'bg-green-500' : stall.healthStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
                             <div className="p-5">
@@ -186,7 +217,7 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredStalls.map(stall => (
+                            {paginatedStalls.map(stall => (
                                 <tr key={stall.id} className="hover:bg-gray-50 border-b last:border-0">
                                     <td className="p-4 font-bold text-gray-900">{stall.number}</td>
                                     <td className="p-4 text-sm text-gray-600">{getMarketName(stall.marketId)}</td>
@@ -203,6 +234,31 @@ const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, onCreateSt
                     </table>
                 </div>
             )}
+
+            {/* Pagination Controls */}
+            <div className="flex justify-between items-center mt-6">
+                <p className="text-xs text-gray-500">
+                    Page {page} sur {Math.ceil(totalCount / 20)}
+                </p>
+                <div className="flex gap-2">
+                    <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={() => setPage(p => Math.max(1, p - 1))} 
+                        disabled={page === 1}
+                    >
+                        <ChevronLeft className="w-4 h-4 mr-1"/> Précédent
+                    </Button>
+                    <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={() => setPage(p => p + 1)} 
+                        disabled={page * 20 >= totalCount}
+                    >
+                        Suivant <ChevronRight className="w-4 h-4 ml-1"/>
+                    </Button>
+                </div>
+            </div>
         </CardContent>
 
         {/* Modal Création Unitaire */}
