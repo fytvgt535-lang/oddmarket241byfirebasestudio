@@ -1,8 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { X, FileText, Users, Activity, DollarSign, AlertTriangle, Send, MessageSquare, Shield, Calendar, Download, AlertCircle, Phone, Mail, UserCheck, Key, Image as ImageIcon, User, MapPin, Loader2 } from 'lucide-react';
 import { Stall, Transaction, StallDocument, StallMessage, StallActivity, StallEmployee } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { logViewAction } from '../services/supabaseService';
+import { supabase } from '../supabaseClient';
 
 interface StallDigitalTwinProps {
   stall: Stall;
@@ -15,6 +17,17 @@ const StallDigitalTwin: React.FC<StallDigitalTwinProps> = ({ stall, transactions
   const [newMessage, setNewMessage] = useState('');
   const [messages, setMessages] = useState<StallMessage[]>(stall.messages || []); // State for direct messages
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+
+  // --- GOD'S EYE: LOG ACCESS ---
+  useEffect(() => {
+      const logAccess = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              logViewAction(user.id, `Jumeau Numérique - Étal ${stall.number}`, stall.id);
+          }
+      };
+      logAccess();
+  }, [stall.id]);
 
   // Chart Data Preparation for Finance Tab
   const chartData = useMemo(() => {
@@ -60,13 +73,9 @@ const StallDigitalTwin: React.FC<StallDigitalTwinProps> = ({ stall, transactions
             date: Date.now(),
             read: false
         };
-        // Simulate API call to send message and update stall
-        // In a real app, this would involve a Supabase update for the stall's messages JSONB field
         const updatedMessages = [...messages, newMsg];
-        setMessages(updatedMessages); // Optimistic UI update
-        // await supabaseService.updateStall(stall.id, { messages: updatedMessages }); // Actual DB call
+        setMessages(updatedMessages); 
         setNewMessage('');
-        // Also: Trigger a notification to the vendor
         alert(`Message envoyé au vendeur de l'étal ${stall.number} : "${newMsg.content}"`);
     } catch (error) {
         console.error("Failed to send message:", error);

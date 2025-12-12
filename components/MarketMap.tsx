@@ -1,18 +1,19 @@
-
-import React, { useState } from 'react';
-import { Stall, PaymentProvider, ProductType, Language } from '../types';
+import React, { useState, memo, useEffect } from 'react';
+import { Stall, PaymentProvider, ProductType, Language, Market } from '../types';
 import { t } from '../services/translations';
-import { ShoppingBag, Smartphone, Baby, Lock, QrCode, Scan, ShieldCheck, RefreshCw, MapPin, Loader2 } from 'lucide-react';
+import { ShoppingBag, Smartphone, Baby, Lock, QrCode, Scan, ShieldCheck, RefreshCw, MapPin, Loader2, Building2, ChevronDown } from 'lucide-react';
 import { verifyAgentIdentity } from '../services/supabaseService';
 import toast from 'react-hot-toast';
 
 interface MarketMapProps {
   stalls: Stall[];
+  markets?: Market[]; // New prop for real data switching
   onReserve: (stallId: string, provider: PaymentProvider, isPriority: boolean) => Promise<void> | void;
   language: Language;
 }
 
-const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) => {
+const MarketMap: React.FC<MarketMapProps> = memo(({ stalls, markets = [], onReserve, language }) => {
+  const [selectedMarketId, setSelectedMarketId] = useState<string>('');
   const [selectedStall, setSelectedStall] = useState<Stall | null>(null);
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('orange');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -23,12 +24,19 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
   const [agentScanned, setAgentScanned] = useState(false);
   const [isScanMode, setIsScanMode] = useState(false);
 
+  // Auto-select first market if available
+  useEffect(() => {
+      if (markets.length > 0 && !selectedMarketId) {
+          setSelectedMarketId(markets[0].id);
+      }
+  }, [markets]);
+
   const handleStallClick = (stall: Stall) => {
     if (stall.status === 'free') {
       setSelectedStall(stall);
-      setIsPriorityRequest(false); // Reset priority
+      setIsPriorityRequest(false);
       setAgentScanned(false);
-      setPaymentProvider('orange'); // Reset to default non-cash
+      setPaymentProvider('orange');
     }
   };
 
@@ -60,21 +68,44 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
       }
   };
 
+  // Filtering Logic
+  const marketStalls = stalls.filter(s => s.marketId === selectedMarketId);
   const filteredStalls = filter === 'all' 
-    ? stalls 
-    : stalls.filter(s => s.productType === filter);
+    ? marketStalls 
+    : marketStalls.filter(s => s.productType === filter);
 
-  // Derive zones from data
-  const zones = [...new Set(stalls.map(s => s.zone))];
+  // Derive zones from filtered data
+  const zones = [...new Set(marketStalls.map(s => s.zone))];
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-6">
-      {/* Header & Filters */}
+      
+      {/* MARKET SELECTOR HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-          <ShoppingBag className="w-5 h-5 text-green-600" />
-          {t(language, 'reserve_stall')}
-        </h2>
+        <div className="w-full md:w-auto">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-2">
+                <ShoppingBag className="w-5 h-5 text-green-600" />
+                {t(language, 'reserve_stall')}
+            </h2>
+            
+            {markets.length > 0 && (
+                <div className="relative inline-block w-full md:w-64">
+                    <select
+                        value={selectedMarketId}
+                        onChange={(e) => setSelectedMarketId(e.target.value)}
+                        className="w-full appearance-none bg-slate-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold"
+                    >
+                        {markets.map(m => (
+                            <option key={m.id} value={m.id}>{m.name} - {m.city}</option>
+                        ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                        <ChevronDown className="w-4 h-4"/>
+                    </div>
+                </div>
+            )}
+        </div>
+
         <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto no-scrollbar">
           {(['all', 'vivres', 'textile', 'divers'] as const).map((type) => (
             <button
@@ -98,8 +129,10 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
           <p className="text-sm text-gray-400">Contactez l'administration pour plus d'informations.</p>
         </div>
       ) : zones.map(zone => (
-        <div key={zone} className="mb-8">
-            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1">{zone}</h3>
+        <div key={zone} className="mb-8 animate-slide-up">
+            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1 flex items-center gap-2">
+                <MapPin className="w-3 h-3"/> Zone {zone}
+            </h3>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {filteredStalls.filter(s => s.zone === zone).map((stall) => (
                 <button
@@ -116,7 +149,7 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
                 >
                     <span className="font-bold text-gray-700 text-lg">{stall.number}</span>
                     <span className="text-[10px] text-gray-500 uppercase tracking-wide mt-1">{stall.productType}</span>
-                    <span className="text-xs font-semibold text-gray-600">{stall.price.toLocaleString()} FCFA</span>
+                    <span className="text-xs font-semibold text-gray-600">{stall.price.toLocaleString()} F</span>
                     
                     {/* Status Indicators */}
                     <div className="absolute top-2 right-2 flex gap-1">
@@ -137,9 +170,16 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
       {selectedStall && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-            <h3 className="text-lg font-bold mb-4 border-b pb-2">Réserver l'étal #{selectedStall.number}</h3>
+            <h3 className="text-lg font-bold mb-4 border-b pb-2 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-gray-500"/>
+                Réserver l'étal #{selectedStall.number}
+            </h3>
             
             <div className="space-y-4 mb-6">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Marché:</span>
+                <span className="font-bold">{markets.find(m => m.id === selectedMarketId)?.name}</span>
+              </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Zone / Produit:</span>
                 <span className="font-medium capitalize">{selectedStall.zone} ({selectedStall.productType})</span>
@@ -150,7 +190,7 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
               </div>
             </div>
 
-            {/* Priority Option - FIXED: Changed div to button for A11y */}
+            {/* Priority Option */}
             <button 
               onClick={() => setIsPriorityRequest(!isPriorityRequest)}
               className={`w-full mb-6 p-3 rounded-lg border cursor-pointer flex items-center gap-3 transition-colors text-left
@@ -233,6 +273,6 @@ const MarketMap: React.FC<MarketMapProps> = ({ stalls, onReserve, language }) =>
       )}
     </div>
   );
-};
+});
 
 export default MarketMap;

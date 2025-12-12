@@ -1,70 +1,134 @@
 
-import { ProductOffer, LocalVendor } from '../types';
+import { supabase } from '../supabaseClient';
+import { ProductOffer, LocalVendor, Product, Stall } from '../types';
 
 /**
- * BASE DE DONNÉES EMBARQUÉE (SIMULATION SQLITE/WATERMELONDB)
- * Cette donnée est stockée dans le bundle de l'app pour garantir le mode 100% Hors-Ligne.
+ * SHOPPER SYNC SERVICE (REAL DATA + OFFLINE CACHE)
+ * Remplace les données mockées par une synchronisation réelle avec Supabase.
+ * Les données sont mises en cache dans localStorage pour garantir la rapidité de l'IA.
  */
 
-const VENDORS: LocalVendor[] = [
-    { id: 'v1', name: 'Chez Maman Rose', type: 'bio', rating: 4.8, distance: 'Zone Vivres A' },
-    { id: 'v2', name: 'Le Panier Frais', type: 'standard', rating: 4.2, distance: 'Zone Vivres B' },
-    { id: 'v3', name: 'Grossiste 241', type: 'grossiste', rating: 3.9, distance: 'Zone Entrepôt' },
-    { id: 'v4', name: 'Coopérative Locale', type: 'bio', rating: 4.9, distance: 'Zone C' },
-    { id: 'v5', name: 'Discount Market', type: 'economique', rating: 3.5, distance: 'Entrée Principale' },
-];
+const CACHE_KEY_INVENTORY = 'mc_shopper_inventory';
+const CACHE_KEY_VENDORS = 'mc_shopper_vendors';
+const CACHE_TTL = 1000 * 60 * 60; // 1 heure de cache
 
-// Catalogue Inventaire (Produit -> Offres multiples)
-const INVENTORY: Record<string, Omit<ProductOffer, 'productName' | 'productId'>[]> = {
-    'tomate': [
-        { id: 'o1', vendor: VENDORS[0], price: 1000, unit: 'tas', attributes: { isBio: true, isFresh: true, isLocal: true, isPromo: false } },
-        { id: 'o2', vendor: VENDORS[2], price: 800, unit: 'tas', attributes: { isBio: false, isFresh: true, isLocal: false, isPromo: true } },
-        { id: 'o3', vendor: VENDORS[4], price: 600, unit: 'tas', attributes: { isBio: false, isFresh: false, isLocal: false, isPromo: false } },
-    ],
-    'manioc': [
-        { id: 'o4', vendor: VENDORS[3], price: 2500, unit: 'baton', attributes: { isBio: true, isFresh: true, isLocal: true, isPromo: false } },
-        { id: 'o5', vendor: VENDORS[1], price: 2200, unit: 'baton', attributes: { isBio: false, isFresh: true, isLocal: true, isPromo: false } },
-    ],
-    'oseille': [
-        { id: 'o6', vendor: VENDORS[0], price: 500, unit: 'paquet', attributes: { isBio: true, isFresh: true, isLocal: true, isPromo: false } },
-    ],
-    'poisson': [
-        { id: 'o7', vendor: VENDORS[1], price: 4000, unit: 'kg', attributes: { isBio: false, isFresh: true, isLocal: true, isPromo: false } },
-        { id: 'o8', vendor: VENDORS[4], price: 3500, unit: 'kg', attributes: { isBio: false, isFresh: false, isLocal: false, isPromo: true } },
-    ],
-    'riz': [
-        { id: 'o9', vendor: VENDORS[2], price: 11000, unit: 'sac 25kg', attributes: { isBio: false, isFresh: false, isLocal: false, isPromo: false } },
-        { id: 'o10', vendor: VENDORS[4], price: 10500, unit: 'sac 25kg', attributes: { isBio: false, isFresh: false, isLocal: false, isPromo: true } },
-    ],
-    'piment': [
-        { id: 'o11', vendor: VENDORS[0], price: 500, unit: 'tas', attributes: { isBio: true, isFresh: true, isLocal: true, isPromo: false } },
-        { id: 'o12', vendor: VENDORS[4], price: 250, unit: 'tas', attributes: { isBio: false, isFresh: false, isLocal: false, isPromo: true } },
-    ]
-};
+interface CachedData {
+    timestamp: number;
+    inventory: Record<string, Omit<ProductOffer, 'productName' | 'productId'>[]>;
+    vendors: LocalVendor[];
+}
 
-// Map des synonymes pour le NLP
+// Map des synonymes pour le NLP (Statique pour l'instant, pourrait être en DB)
 export const SYNONYMS: Record<string, string> = {
     'tomates': 'tomate', 'tomat': 'tomate',
     'tubercule': 'manioc', 'bâton': 'manioc', 'cassava': 'manioc',
     'feuilles': 'oseille', 'legumes': 'oseille',
     'carpe': 'poisson', 'machiron': 'poisson', 'fumé': 'poisson',
     'riz parfumé': 'riz',
-    'piment oiseau': 'piment'
+    'piment oiseau': 'piment',
+    'arachide': 'arachides', 'graine': 'arachides'
 };
 
 /**
- * Recherche locale dans la base
+ * Synchronise les données depuis Supabase vers le Cache Local
+ */
+export const syncShopperData = async (): Promise<void> => {
+    if (!navigator.onLine) return; // Ne rien faire si hors ligne, utiliser le cache existant
+
+    try {
+        // 1. Récupérer les données brutes
+        const { data: products } = await supabase.from('products').select('*, stall:stalls(id, zone, number, occupant_name, compliance_score)').eq('is_visible', true);
+        
+        if (!products) return;
+
+        // 2. Transformer en format optimisé pour la recherche locale
+        const vendorsMap = new Map<string, LocalVendor>();
+        const inventory: Record<string, any[]> = {};
+
+        products.forEach((p: any) => {
+            // Construire le vendeur
+            const stall = p.stall;
+            if (!stall) return;
+
+            const vendorId = stall.id;
+            if (!vendorsMap.has(vendorId)) {
+                vendorsMap.set(vendorId, {
+                    id: vendorId,
+                    name: stall.occupant_name || `Étal ${stall.number}`,
+                    type: 'standard', // CORRECTION: Utilisation d'un type valide défini dans types.ts
+                    rating: (stall.compliance_score / 20), // Score 100 -> 5 étoiles
+                    distance: `Zone ${stall.zone}`
+                });
+            }
+
+            // Construire l'offre
+            const cleanName = p.name.toLowerCase().trim();
+            // Indexer par mots clés simples du nom
+            const keywords = cleanName.split(' ');
+            
+            const offer = {
+                id: p.id,
+                vendor: vendorsMap.get(vendorId),
+                price: p.price,
+                unit: p.unit,
+                attributes: {
+                    isBio: (p.tags || []).includes('bio'),
+                    isFresh: p.freshness_level ? p.freshness_level > 80 : true,
+                    isLocal: (p.origin || '').toLowerCase().includes('gabon'),
+                    isPromo: p.is_promo || false
+                }
+            };
+
+            // Ajouter aux index
+            keywords.forEach((k: string) => {
+                if (k.length < 3) return; // Ignorer mots courts
+                if (!inventory[k]) inventory[k] = [];
+                inventory[k].push(offer);
+            });
+            
+            // Indexer aussi par catégorie
+            const cat = p.category.toLowerCase();
+            if (!inventory[cat]) inventory[cat] = [];
+            inventory[cat].push(offer);
+        });
+
+        // 3. Sauvegarder dans le cache
+        const cachePayload: CachedData = {
+            timestamp: Date.now(),
+            inventory,
+            vendors: Array.from(vendorsMap.values())
+        };
+        
+        localStorage.setItem(CACHE_KEY_INVENTORY, JSON.stringify(cachePayload));
+        console.log("Shopper Data Synced:", Object.keys(inventory).length, "keywords indexed.");
+
+    } catch (e) {
+        console.error("Sync Error:", e);
+    }
+};
+
+/**
+ * Recherche locale dans la base (Cache ou Fallback)
  */
 export const searchOffersLocal = (term: string): ProductOffer[] => {
-    // 1. Normalisation
+    // 1. Charger le cache
+    let data: CachedData | null = null;
+    try {
+        const cached = localStorage.getItem(CACHE_KEY_INVENTORY);
+        if (cached) data = JSON.parse(cached);
+    } catch (e) {}
+
+    // Si pas de données, renvoyer vide (l'UI demandera une synchro si nécessaire)
+    if (!data || !data.inventory) return [];
+
+    // 2. Normalisation
     let cleanTerm = term.toLowerCase().trim();
-    // 2. Synonymes
     if (SYNONYMS[cleanTerm]) cleanTerm = SYNONYMS[cleanTerm];
     
-    // 3. Recherche exacte ou partielle
-    // Priorité à la clé exacte
-    if (INVENTORY[cleanTerm]) {
-        return INVENTORY[cleanTerm].map(offer => ({
+    // 3. Recherche
+    // Recherche exacte
+    if (data.inventory[cleanTerm]) {
+        return data.inventory[cleanTerm].map((offer: any) => ({
             ...offer,
             productId: cleanTerm,
             productName: cleanTerm.charAt(0).toUpperCase() + cleanTerm.slice(1)
@@ -72,9 +136,9 @@ export const searchOffersLocal = (term: string): ProductOffer[] => {
     }
 
     // Fallback: Recherche partielle (ex: "gros manioc" -> "manioc")
-    const foundKey = Object.keys(INVENTORY).find(k => cleanTerm.includes(k));
+    const foundKey = Object.keys(data.inventory).find(k => cleanTerm.includes(k) || k.includes(cleanTerm));
     if (foundKey) {
-        return INVENTORY[foundKey].map(offer => ({
+        return data.inventory[foundKey].map((offer: any) => ({
             ...offer,
             productId: foundKey,
             productName: foundKey.charAt(0).toUpperCase() + foundKey.slice(1)

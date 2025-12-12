@@ -24,7 +24,8 @@
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "react-easy-crop": "5.2.0",
     "tslib": "2.6.2",
-    "react-hot-toast": "2.4.1"
+    "react-hot-toast": "2.4.1",
+    "html5-qrcode": "^2.3.8"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

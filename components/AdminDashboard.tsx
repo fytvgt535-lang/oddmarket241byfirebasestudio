@@ -28,6 +28,14 @@ interface AdminDashboardProps {
   orders?: ClientOrder[];
   missions?: Mission[];
   
+  // Aggregated Stats from RPC
+  financialStats?: {
+      totalRevenue: number;
+      todayRevenue: number;
+      occupancyRate: number;
+      collectionRate: number;
+  };
+
   loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean; missions?: boolean };
   onLoadFinance?: () => void;
   onLoadUsers?: () => void;
@@ -55,9 +63,10 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-    markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], agents = [], missions = [],
+    markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], agents = [], missions = [], paymentPlans = [],
+    financialStats, // Injected Stats
     loadingStates, onLoadFinance, onLoadUsers, onLoadMissions,
-    onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls,
+    onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls, onApprovePlan,
     onAssignMission, onValidateCashDrop,
     currentLanguage
 }) => {
@@ -67,46 +76,41 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
-      // Trigger lazy loads based on tab, but don't block UI
+      // Trigger lazy loads based on tab
       if (activeTab === 'finance' || activeTab === 'overview') onLoadFinance && onLoadFinance();
       if (activeTab === 'users' || activeTab === 'audit' || activeTab === 'agents') onLoadUsers && onLoadUsers();
       if (activeTab === 'agents') onLoadMissions && onLoadMissions();
-  }, [activeTab]); // Depend only on activeTab to avoid loop
+  }, [activeTab]); 
 
-  const safeTransactions = Array.isArray(transactions) ? transactions : [];
-  const filteredTransactions = useMemo(() => selectedMarketId === 'all' ? safeTransactions : safeTransactions.filter(t => t.marketId === selectedMarketId), [safeTransactions, selectedMarketId]);
-  
-  // Memoize heavy calculations
-  const { totalRevenue, todayRevenue, collectionRate, occupancyRate } = useMemo(() => {
-      const totRev = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+  // Stats Logic: Prefer RPC stats if available, otherwise fallback to local calc (legacy)
+  const stats = useMemo(() => {
+      if (financialStats) {
+          return {
+              totalRevenue: financialStats.totalRevenue,
+              todayRevenue: financialStats.todayRevenue,
+              collectionRate: financialStats.collectionRate,
+              occupancyRate: financialStats.occupancyRate
+          };
+      }
       
-      const startOfDay = new Date();
-      startOfDay.setHours(0,0,0,0);
-      const todRev = filteredTransactions
-        .filter(t => t.date >= startOfDay.getTime())
-        .reduce((acc, curr) => acc + curr.amount, 0);
-
-      const potRev = stalls.reduce((acc, s) => acc + s.price, 0);
-      const colRate = Math.round((totRev / (potRev > 0 ? potRev : 1)) * 100) || 0;
-      
-      const occStalls = stalls.filter(s => s.status === 'occupied').length;
-      const totStalls = stalls.length;
-      const occRate = totStalls > 0 ? Math.round((occStalls / totStalls) * 100) : 0;
-
-      return { totalRevenue: totRev, todayRevenue: todRev, collectionRate: colRate, occupancyRate: occRate };
-  }, [filteredTransactions, stalls]);
+      // Fallback logic (Only accurate if all tx are loaded, which is not true anymore)
+      const safeTransactions = Array.isArray(transactions) ? transactions : [];
+      const totRev = safeTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+      return { totalRevenue: totRev, todayRevenue: 0, collectionRate: 0, occupancyRate: 0 };
+  }, [financialStats, transactions]);
 
   const unreadNotifs = notifications.filter(n => !n.read).length;
-  
+  const isLoadingFinance = loadingStates?.finance;
+
   // Generate enriched activity feed with geolocation
   const activityFeed = useMemo(() => {
+      const safeTransactions = Array.isArray(transactions) ? transactions : [];
+      const safeOrders = Array.isArray(orders) ? orders : [];
       return [
-          ...filteredTransactions.map(t => ({ ...t, kind: 'transaction' as const, location: simulateGlobalLocation() })),
-          ...orders.map(o => ({ ...o, kind: 'order' as const, amount: o.totalAmount, location: simulateGlobalLocation() }))
+          ...safeTransactions.map(t => ({ ...t, kind: 'transaction' as const, location: simulateGlobalLocation() })),
+          ...safeOrders.map(o => ({ ...o, kind: 'order' as const, amount: o.totalAmount, location: simulateGlobalLocation() }))
       ].sort((a, b) => b.date - a.date).slice(0, 15); 
-  }, [filteredTransactions, orders]);
-
-  const isLoadingFinance = loadingStates?.finance;
+  }, [transactions, orders]);
 
   return (
     <div className="space-y-6 relative">
@@ -180,18 +184,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span className="flex items-center gap-2"><Globe className="w-3 h-3 text-blue-400"/> {t(currentLanguage, 'ct_sync_queue')}: 0</span>
                 </div>
                 <div className="flex items-center gap-4">
-                    <span>Build: v2.4.1 (Stable)</span>
+                    <span>Build: v2.4.2 (Smart Sync)</span>
                     <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {loadingStates?.users ? '...' : users.length}</span>
                 </div>
             </div>
 
-            {/* MAIN KPI GRID - WITH SKELETONS */}
+            {/* MAIN KPI GRID - USING RPC STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_revenue_today')}</p>
-                            {isLoadingFinance ? <Skeleton width={120} height={32} className="mb-1"/> : <h3 className="text-2xl font-black text-gray-800">{formatCurrency(todayRevenue)}</h3>}
+                            {isLoadingFinance ? <Skeleton width={120} height={32} className="mb-1"/> : <h3 className="text-2xl font-black text-gray-800">{formatCurrency(stats.todayRevenue)}</h3>}
                         </div>
                         <div className="p-2 bg-green-100 text-green-600 rounded-lg"><TrendingUp className="w-5 h-5"/></div>
                     </div>
@@ -206,7 +210,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'recovery_rate')}</p>
-                            {isLoadingFinance ? <Skeleton width={80} height={32} className="mb-1"/> : <h3 className={`text-2xl font-black ${collectionRate < 70 ? 'text-red-500' : 'text-blue-600'}`}>{collectionRate}%</h3>}
+                            {isLoadingFinance ? <Skeleton width={80} height={32} className="mb-1"/> : <h3 className={`text-2xl font-black ${stats.collectionRate < 70 ? 'text-red-500' : 'text-blue-600'}`}>{stats.collectionRate}%</h3>}
                         </div>
                         <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><DollarSign className="w-5 h-5"/></div>
                     </div>
@@ -217,7 +221,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase mb-1">{t(currentLanguage, 'ct_occupancy_avg')}</p>
-                            <h3 className="text-2xl font-black text-gray-800">{occupancyRate}%</h3>
+                            <h3 className="text-2xl font-black text-gray-800">{stats.occupancyRate}%</h3>
                         </div>
                         <div className="p-2 bg-purple-100 text-purple-600 rounded-lg"><LayoutGrid className="w-5 h-5"/></div>
                     </div>
@@ -252,9 +256,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     
                     <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto pr-2">
                         {markets.map(m => {
-                            // Quick Health Calc
+                            // Quick Health Calc (Ideally this should also come from RPC but we approximate here)
                             const mStalls = stalls.filter(s => s.marketId === m.id);
-                            const mTrans = filteredTransactions.filter(t => t.marketId === m.id);
+                            const mTrans = Array.isArray(transactions) ? transactions.filter(t => t.marketId === m.id) : [];
                             const mRev = mTrans.reduce((acc, t) => acc + t.amount, 0);
                             const mRate = m.targetRevenue ? (mRev / m.targetRevenue) * 100 : 0;
                             const statusColor = mRate > 70 ? 'bg-green-50 border-green-200' : mRate > 40 ? 'bg-orange-50 border-orange-200' : 'bg-red-50 border-red-200';
@@ -376,9 +380,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <FinanceManager 
             markets={markets} 
             expenses={expenses} 
+            stalls={stalls}
+            sanctions={sanctions || []}
+            paymentPlans={paymentPlans}
             loading={loadingStates?.finance}
             onAddExpense={onAddExpense!} 
             onDeleteExpense={onDeleteExpense!}
+            onApprovePlan={onApprovePlan}
             currentLanguage={currentLanguage}
           />
       )}
@@ -388,7 +396,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             users={users} 
             stalls={stalls}
             markets={markets}
-            sanctions={sanctions}
+            sanctions={sanctions || []}
             loading={loadingStates?.users}
             onUpdateUserStatus={onUpdateUserStatus!} 
             currentLanguage={currentLanguage}

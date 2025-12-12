@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Shield, User, Clock, Search, RefreshCw, Loader2, Eye, Activity, Smartphone, Monitor, Globe, Info, Terminal } from 'lucide-react';
+import { Shield, User, Clock, Search, RefreshCw, Loader2, Eye, Activity, Smartphone, Monitor, Globe, Info, Terminal, ScanFace, ArrowRight, FileText } from 'lucide-react';
 import { AuditLog, User as UserType } from '../../types';
 import { fetchAuditLogs, subscribeToTable } from '../../services/supabaseService';
 import { Card } from '../ui/Card';
@@ -21,7 +21,6 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
   const [selectedActorId, setSelectedActorId] = useState<string | 'all'>('all');
   const [isLive, setIsLive] = useState(false);
   
-  // ALPHABET KIT FILTER (Added as requested)
   const [alphaFilter, setAlphaFilter] = useState<string | null>(null);
 
   const loadLogs = useCallback(async (silent = false) => {
@@ -80,8 +79,6 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
 
           const matchesSearch = l.action.toLowerCase().includes(search.toLowerCase()) || l.targetId.includes(search);
           const matchesActor = selectedActorId === 'all' || l.actorId === selectedActorId;
-          
-          // Alphabet Filter: Filters by Actor Name (First Letter)
           const matchesAlpha = alphaFilter ? actorName.toUpperCase().startsWith(alphaFilter) : true;
 
           return matchesSearch && matchesActor && matchesAlpha;
@@ -95,24 +92,70 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
       return <Monitor className="w-3 h-3 text-blue-500"/>;
   };
 
-  const getHumanReadableDiff = (log: AuditLog) => {
-      if (log.action.includes('LOGIN')) return "Connexion sécurisée au portail.";
-      if (log.action.includes('LOGOUT')) return "Fermeture de session.";
+  // --- DIFFERENTIAL RENDERING (THE CORE OF "GOD'S EYE") ---
+  const renderDiff = (log: AuditLog) => {
+      const newValue = log.newValue || {};
+      const oldValue = log.oldValue || {};
       
-      const newVal = (log.newValue as any) || {};
-      const displayKeys = Object.keys(newVal).filter(k => k !== '_meta' && k !== 'passwordHash' && k !== 'id');
-      
-      if (displayKeys.length === 0) return log.reason || "Action système.";
-      
+      const keys = new Set([...Object.keys(newValue), ...Object.keys(oldValue)]);
+      const diffKeys = Array.from(keys).filter(k => 
+          k !== '_meta' && k !== 'passwordHash' && k !== 'id' && 
+          JSON.stringify(newValue[k]) !== JSON.stringify(oldValue[k])
+      );
+
+      if (diffKeys.length === 0) {
+          // No Diff available or purely new creation
+          if (!log.oldValue && log.newValue) {
+             const displayKeys = Object.keys(newValue).filter(k => k !== '_meta');
+             return (
+                 <div className="mt-1 flex flex-wrap gap-1">
+                     {displayKeys.slice(0, 3).map(k => (
+                         <span key={k} className="text-[10px] bg-green-50 px-2 py-0.5 rounded border border-green-100 text-green-700 font-mono">
+                             + {k}: {String(newValue[k]).substring(0, 20)}
+                         </span>
+                     ))}
+                 </div>
+             );
+          }
+          return <span className="text-gray-400 italic text-xs">Pas de modification de valeur détectée.</span>;
+      }
+
       return (
-          <div className="flex flex-wrap gap-1 mt-1">
-              {displayKeys.map(k => (
-                  <span key={k} className="text-[10px] bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-slate-600 font-mono">
-                      {k}: {String(newVal[k]).substring(0, 30)}
-                  </span>
+          <div className="mt-2 space-y-1">
+              {diffKeys.map(k => (
+                  <div key={k} className="flex items-center gap-2 text-xs font-mono bg-slate-50 p-1 rounded border border-slate-200">
+                      <span className="font-bold text-slate-500 w-24 truncate">{k}</span>
+                      <span className="text-red-500 bg-red-50 px-1 rounded line-through decoration-red-500 opacity-70">
+                          {oldValue[k] !== undefined ? String(oldValue[k]).substring(0, 20) : 'N/A'}
+                      </span>
+                      <ArrowRight className="w-3 h-3 text-slate-400"/>
+                      <span className="text-green-600 bg-green-50 px-1 rounded font-bold">
+                          {newValue[k] !== undefined ? String(newValue[k]).substring(0, 20) : 'Supprimé'}
+                      </span>
+                  </div>
               ))}
           </div>
       );
+  };
+
+  const getHumanReadableAction = (log: AuditLog) => {
+      if (log.newValue?.verification_method === 'qr_handshake') {
+          return (
+              <span className="flex items-center gap-1 text-green-700 font-bold bg-green-50 px-2 py-1 rounded border border-green-200 w-fit">
+                  <ScanFace className="w-4 h-4"/>
+                  Validation Bi-Latérale (QR Handshake)
+              </span>
+          );
+      }
+      if (log.action === 'VIEW_SENSITIVE_DATA') {
+          return (
+              <span className="flex items-center gap-1 text-blue-700 font-bold bg-blue-50 px-2 py-1 rounded border border-blue-200 w-fit">
+                  <Eye className="w-4 h-4"/>
+                  Accès Donnée Sensible
+              </span>
+          );
+      }
+      return renderDiff(log);
   };
 
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('');
@@ -120,7 +163,7 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
   return (
     <div className="flex gap-4 h-[calc(100vh-200px)] animate-fade-in relative">
         
-        {/* ALPHABET KIT SIDEBAR FOR AUDIT */}
+        {/* ALPHABET KIT SIDEBAR */}
         <div className="w-12 shrink-0 flex flex-col gap-1 sticky top-0 h-fit py-4 overflow-y-auto no-scrollbar max-h-full">
             <button 
                 onClick={() => setAlphaFilter(null)} 
@@ -141,6 +184,7 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
         </div>
 
         <div className="flex-1 flex flex-col space-y-4">
+            {/* Header */}
             <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                 <div>
                     <h3 className="text-xl font-black text-gray-800 flex items-center gap-2">
@@ -222,6 +266,11 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
                                 if (log.action.includes('LOGIN')) borderClass = 'border-l-4 border-l-green-500';
                                 if (log.action.includes('DELETE')) borderClass = 'border-l-4 border-l-red-500';
                                 if (log.action.includes('UPDATE')) borderClass = 'border-l-4 border-l-orange-500';
+                                if (log.action === 'VIEW_SENSITIVE_DATA') borderClass = 'border-l-4 border-l-blue-400 bg-blue-50/20';
+                                
+                                // Highlight Handshake Logs
+                                const isHandshake = log.newValue?.verification_method === 'qr_handshake';
+                                if (isHandshake) borderClass = 'border-l-4 border-l-blue-600 ring-1 ring-blue-100 bg-blue-50/30';
 
                                 return (
                                     <div key={log.id} className={`bg-white p-4 rounded-lg shadow-sm border border-gray-100 ${borderClass} relative animate-slide-up hover:shadow-md transition-shadow`}>
@@ -231,9 +280,10 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
                                                     <span className="text-xs font-black text-slate-800 uppercase tracking-wider">{log.action.replace(/_/g, ' ')}</span>
                                                     <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3"/> {new Date(log.createdAt).toLocaleString()}</span>
                                                 </div>
-                                                <p className="text-sm text-gray-700 mt-1">
-                                                    <span className="font-bold text-slate-900">{actors.find(a=>a.id===log.actorId)?.name || 'Système'}</span> : {getHumanReadableDiff(log)}
-                                                </p>
+                                                <div className="text-sm text-gray-700 mt-1">
+                                                    <span className="font-bold text-slate-900">{actors.find(a=>a.id===log.actorId)?.name || 'Système'}</span>
+                                                    <div className="mt-2">{getHumanReadableAction(log)}</div>
+                                                </div>
                                             </div>
                                             
                                             <div className="flex flex-col items-end gap-1 ml-4">
@@ -246,6 +296,7 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
                                                 <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono bg-slate-50 px-1 rounded">
                                                     <Globe className="w-3 h-3"/> {meta.ip || '127.0.0.1'}
                                                 </div>
+                                                <span className="text-[8px] text-gray-300 font-mono">#{log.id.slice(-6)}</span>
                                             </div>
                                         </div>
                                         

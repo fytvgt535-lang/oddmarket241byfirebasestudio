@@ -94,13 +94,31 @@ const NetworkStatus: React.FC = () => {
       }
   };
 
+  // Convert technical action names to human readable text
   const getHumanReadableAction = (action: string, payload: any) => {
-      switch(action) {
-          case 'createTransaction': return `Paiement: ${formatCurrency(payload.amount)}`;
-          case 'createSanction': return `Sanction: ${formatCurrency(payload.amount)} (${payload.stall_number || '?'})`;
-          case 'createProduct': return `Nouveau Produit: ${payload.name}`;
-          case 'createOrder': return `Commande: ${formatCurrency(payload.totalAmount)}`;
-          default: return action;
+      try {
+          switch(action) {
+              case 'createTransaction': 
+                  return `Encaissement : ${formatCurrency(payload.amount)} ${payload.type === 'rent' ? '(Loyer)' : '(Autre)'}`;
+              case 'createSanction': 
+                  return `Sanction : ${formatCurrency(payload.amount)} (${payload.reason || 'Infraction'})`;
+              case 'createProduct': 
+                  return `Ajout Produit : ${payload.name}`;
+              case 'updateProduct': 
+                  return `Modif Produit : ${payload.updates?.name || 'Mise à jour'}`;
+              case 'createOrder': 
+                  return `Commande Client : ${formatCurrency(payload.totalAmount)}`;
+              case 'updateUserProfile': 
+                  return `Mise à jour Profil`;
+              case 'updateMissionStatus':
+                  return `Mission : ${payload.status === 'completed' ? 'Terminée' : payload.status}`;
+              case 'createReport':
+                  return `Signalement : ${payload.category}`;
+              default: 
+                  return `${action} (Données techniques)`;
+          }
+      } catch (e) {
+          return action;
       }
   };
 
@@ -140,7 +158,7 @@ const NetworkStatus: React.FC = () => {
         {/* SYNC MANAGER MODAL */}
         {showManager && (
             <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-                <div className="bg-white rounded-2xl w-full max-w-md h-[70vh] flex flex-col relative overflow-hidden">
+                <div className="bg-white rounded-2xl w-full max-w-md h-[70vh] flex flex-col relative overflow-hidden shadow-2xl">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                             <RefreshCw className="w-5 h-5 text-blue-600"/> Centre de Synchronisation
@@ -185,7 +203,7 @@ const NetworkStatus: React.FC = () => {
                                     ))
                                 )}
                                 {getPendingItems().length > 0 && isOnline && (
-                                    <button onClick={handleManualSync} disabled={isSyncing} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl mt-4 flex items-center justify-center gap-2 hover:bg-blue-700">
+                                    <button onClick={handleManualSync} disabled={isSyncing} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl mt-4 flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-200">
                                         {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin"/> : <UploadCloud className="w-4 h-4"/>}
                                         Forcer l'Envoi ({getPendingItems().length})
                                     </button>
@@ -196,18 +214,21 @@ const NetworkStatus: React.FC = () => {
                         {activeTab === 'failed' && (
                             <>
                                 {getFailedItems().length === 0 ? (
-                                    <p className="text-center py-10 text-gray-400">Aucune erreur critique.</p>
+                                    <div className="text-center py-10 text-gray-400 flex flex-col items-center">
+                                        <CheckCircle className="w-12 h-12 mb-2 text-gray-300 opacity-50"/>
+                                        <p>Aucune erreur critique.</p>
+                                    </div>
                                 ) : (
                                     getFailedItems().map(item => (
-                                        <div key={item.id} className="p-3 bg-red-50 border border-red-100 rounded-lg">
+                                        <div key={item.id} className="p-3 bg-red-50 border border-red-100 rounded-lg shadow-sm">
                                             <div className="flex justify-between mb-1">
                                                 <span className="font-bold text-sm text-gray-800">{getHumanReadableAction(item.action, item.payload)}</span>
                                                 <span className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleTimeString()}</span>
                                             </div>
-                                            <p className="text-xs text-red-700 mb-3 font-mono bg-red-100 p-1 rounded">{item.errorReason || "Erreur inconnue"}</p>
+                                            <p className="text-xs text-red-700 mb-3 font-mono bg-red-100 p-2 rounded break-all">{item.errorReason || "Erreur réseau inconnue"}</p>
                                             <div className="flex gap-2">
-                                                <button onClick={() => handleRetry(item.id)} className="flex-1 py-1.5 bg-white border border-gray-300 rounded text-xs font-bold text-blue-600 hover:bg-blue-50">Réessayer</button>
-                                                <button onClick={() => handleDiscardFailed(item.id)} className="flex-1 py-1.5 bg-white border border-gray-300 rounded text-xs font-bold text-red-600 hover:bg-red-50">Supprimer</button>
+                                                <button onClick={() => handleRetry(item.id)} className="flex-1 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-blue-600 hover:bg-blue-50 transition-colors">Réessayer</button>
+                                                <button onClick={() => handleDiscardFailed(item.id)} className="flex-1 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-red-600 hover:bg-red-50 transition-colors">Supprimer</button>
                                             </div>
                                         </div>
                                     ))

@@ -1,35 +1,64 @@
-import React, { useState } from 'react';
-import { User, Box, Truck, Settings, Bell, Volume2, ArrowLeft } from 'lucide-react';
-import { VendorDashboardProps } from '../types';
+
+import React, { useState, useEffect } from 'react';
+import { User, Box, Truck, Settings, Bell, Volume2, ArrowLeft, Compass } from 'lucide-react';
+import { VendorDashboardProps, Market, PaymentPlan } from '../types';
 import VendorOverview from './vendor/VendorOverview';
 import ProductManager from './vendor/ProductManager';
 import VendorSettings from './vendor/VendorSettings';
+import MarketExplorer from './vendor/MarketExplorer';
 import MarketMap from './MarketMap';
 import { calculateStallDebt, formatCurrency } from '../utils/coreUtils';
+import { fetchMarkets } from '../services/supabaseService';
 
-const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve, onContestSanction }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'store' | 'logistics' | 'settings'>('overview');
+interface ExtendedVendorDashboardProps extends VendorDashboardProps {
+    markets?: Market[];
+    onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
+}
+
+const VendorDashboard: React.FC<ExtendedVendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, markets = [], onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve, onContestSanction, onRequestPlan }) => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'explore' | 'store' | 'logistics' | 'settings'>('overview');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [selectedMarketId, setSelectedMarketId] = useState<string | null>(null);
 
   const unreadNotifs = notifications.filter(n => !n.read).length;
   const { totalDebt } = calculateStallDebt(myStall, sanctions);
 
+  const handleMarketSelection = (marketId: string) => {
+      setSelectedMarketId(marketId);
+      setShowMap(true);
+  };
+
+  const handleReturnFromMap = () => {
+      setShowMap(false);
+      setSelectedMarketId(null);
+  };
+
   if (showMap && stalls && onReserve) {
+      const relevantStalls = selectedMarketId ? stalls.filter(s => s.marketId === selectedMarketId) : stalls;
+      const displayMarkets = selectedMarketId ? markets.filter(m => m.id === selectedMarketId) : markets;
+
       return (
           <div className="relative min-h-screen bg-gray-50 animate-fade-in">
               <div className="sticky top-0 z-10 bg-white shadow-sm p-4 flex items-center justify-between">
-                  <button onClick={() => setShowMap(false)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-bold"><ArrowLeft className="w-5 h-5"/> Retour</button>
+                  <button onClick={handleReturnFromMap} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-bold"><ArrowLeft className="w-5 h-5"/> Retour</button>
                   <h2 className="text-lg font-bold">Choisir un Emplacement</h2>
               </div>
-              <div className="p-4"><MarketMap stalls={stalls} onReserve={(id, provider, priority) => { onReserve(id, provider, priority); setShowMap(false); }} language={profile.language || 'fr'}/></div>
+              <div className="p-4">
+                  <MarketMap 
+                    stalls={relevantStalls} 
+                    markets={displayMarkets}
+                    onReserve={(id, provider, priority) => { onReserve(id, provider, priority); setShowMap(false); setActiveTab('overview'); }} 
+                    language={profile.language || 'fr'}
+                  />
+              </div>
           </div>
       );
   }
 
   return (
-    <div className="space-y-4 relative max-w-2xl mx-auto pb-20">
-      <div className="flex justify-between items-center bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+    <div className="space-y-4 relative max-w-2xl mx-auto pb-24">
+      <div className="flex justify-between items-center bg-white p-3 rounded-2xl shadow-sm border border-gray-100 sticky top-2 z-30">
           <div className="flex items-center gap-3">
                <button className="bg-blue-100 text-blue-600 p-3 rounded-full active:scale-95 transition-transform"><Volume2 className="w-6 h-6" /></button>
                <div><h2 className="font-bold text-gray-800 text-lg leading-tight">{profile.name}</h2><p className="text-gray-400 text-xs">Vendeur Certifié</p></div>
@@ -39,17 +68,45 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
           </button>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
-        {[ { id: 'overview', icon: User, color: 'text-blue-600', bg: 'bg-blue-50', label: 'Moi' }, { id: 'store', icon: Box, color: 'text-purple-600', bg: 'bg-purple-50', label: 'Rayons' }, { id: 'logistics', icon: Truck, color: 'text-orange-600', bg: 'bg-orange-50', label: 'Livraison' }, { id: 'settings', icon: Settings, color: 'text-gray-600', bg: 'bg-gray-50', label: 'Réglages' } ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex flex-col items-center justify-center p-3 rounded-2xl transition-all active:scale-95 border-2 ${activeTab === tab.id ? `border-${(tab.color.split('-')[1] as string)}-200 shadow-md transform scale-105 bg-white` : 'border-transparent bg-white shadow-sm'}`}>
-                <div className={`p-3 rounded-full mb-1 ${activeTab === tab.id ? tab.bg : 'bg-gray-50'}`}><tab.icon className={`w-6 h-6 ${activeTab === tab.id ? tab.color : 'text-gray-400'}`} /></div>
-                <span className={`text-xs font-bold ${activeTab === tab.id ? 'text-gray-800' : 'text-gray-400'}`}>{tab.label}</span>
+      <div className="grid grid-cols-5 gap-2 px-1">
+        {[ 
+            { id: 'overview', icon: User, color: 'text-blue-600', bg: 'bg-blue-50', label: 'Moi' },
+            { id: 'explore', icon: Compass, color: 'text-green-600', bg: 'bg-green-50', label: 'Explorer' }, 
+            { id: 'store', icon: Box, color: 'text-purple-600', bg: 'bg-purple-50', label: 'Rayons' }, 
+            { id: 'logistics', icon: Truck, color: 'text-orange-600', bg: 'bg-orange-50', label: 'Envoi' }, 
+            { id: 'settings', icon: Settings, color: 'text-gray-600', bg: 'bg-gray-50', label: 'Réglages' } 
+        ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex flex-col items-center justify-center p-2 rounded-2xl transition-all active:scale-95 border-2 ${activeTab === tab.id ? `border-${(tab.color.split('-')[1] as string)}-200 shadow-md transform scale-105 bg-white` : 'border-transparent bg-white shadow-sm'}`}>
+                <div className={`p-2 rounded-full mb-1 ${activeTab === tab.id ? tab.bg : 'bg-gray-50'}`}><tab.icon className={`w-5 h-5 ${activeTab === tab.id ? tab.color : 'text-gray-400'}`} /></div>
+                <span className={`text-[10px] font-bold ${activeTab === tab.id ? 'text-gray-800' : 'text-gray-400'}`}>{tab.label}</span>
             </button>
         ))}
       </div>
 
-      {activeTab === 'overview' && <VendorOverview profile={profile} myStall={myStall} totalDebt={totalDebt} transactions={transactions} sanctions={sanctions} onShowMap={() => setShowMap(true)} onSpeak={() => {}} onContestSanction={onContestSanction} />}
+      {activeTab === 'overview' && (
+          <VendorOverview 
+            profile={profile} 
+            myStall={myStall} 
+            totalDebt={totalDebt} 
+            transactions={transactions} 
+            sanctions={sanctions} 
+            onShowMap={() => setActiveTab('explore')} 
+            onSpeak={() => {}} 
+            onContestSanction={onContestSanction}
+            onRequestPlan={onRequestPlan} // Pass down
+          />
+      )}
+      
+      {activeTab === 'explore' && (
+          <MarketExplorer 
+            markets={markets} 
+            stalls={stalls} 
+            onSelectMarket={handleMarketSelection}
+          />
+      )}
+
       {activeTab === 'store' && <ProductManager products={products} myStall={myStall} profile={profile} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onDeleteProduct={onDeleteProduct} />}
+      
       {activeTab === 'logistics' && (
            <div className={`rounded-3xl p-6 relative overflow-hidden text-white shadow-lg animate-fade-in ${profile.isLogisticsSubscribed ? 'bg-orange-500' : 'bg-slate-800'}`}>
               <div className="relative z-10">
@@ -58,7 +115,8 @@ const VendorDashboard: React.FC<VendorDashboardProps> = ({ profile, transactions
               </div>
           </div>
       )}
-      {activeTab === 'settings' && <VendorSettings profile={profile} onUpdateProfile={onUpdateProfile!} />}
+      
+      {activeTab === 'settings' && <VendorSettings profile={profile} myStall={myStall} onUpdateProfile={onUpdateProfile!} />}
     </div>
   );
 };

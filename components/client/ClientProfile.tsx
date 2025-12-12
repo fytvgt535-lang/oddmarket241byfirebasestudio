@@ -7,14 +7,15 @@ import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import toast from 'react-hot-toast';
-import { signOutUser, uploadFile, updateUserProfile, getCurrentUserProfile } from '../../services/supabaseService';
+import { uploadFile, updateUserProfile, getCurrentUserProfile } from '../../services/supabaseService';
 import { supabase } from '../../supabaseClient';
 
 interface ClientProfileProps {
   stalls: Stall[]; // Needed for favorites selection
+  onSignOut?: () => void;
 }
 
-const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
+const ClientProfile: React.FC<ClientProfileProps> = ({ stalls, onSignOut }) => {
   const [user, setUser] = useState<UserType | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'shopping' | 'addresses'>('general');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +225,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
       {activeTab === 'general' && (
         <div className="space-y-4 animate-slide-up">
           <Card className="divide-y divide-gray-100">
-            {/* FAVORITES TRIGGER - FIXED A11Y */}
+            {/* FAVORITES TRIGGER */}
             <button onClick={() => setIsFavoritesOpen(true)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-pink-100 text-pink-600 rounded-full"><Heart className="w-5 h-5"/></div>
@@ -236,7 +237,7 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
               <Edit3 className="w-4 h-4 text-gray-400"/>
             </button>
 
-            {/* PREFERENCES TRIGGER - FIXED A11Y */}
+            {/* PREFERENCES TRIGGER */}
             <button onClick={() => setIsPrefsOpen(true)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 text-blue-600 rounded-full"><Settings className="w-5 h-5"/></div>
@@ -249,13 +250,13 @@ const ClientProfile: React.FC<ClientProfileProps> = ({ stalls }) => {
             </button>
           </Card>
 
-          <Button variant="outline" className="w-full text-red-600 border-red-100 hover:bg-red-50" onClick={signOutUser}>
+          <Button variant="outline" className="w-full text-red-600 border-red-100 hover:bg-red-50" onClick={onSignOut}>
             <LogOut className="w-4 h-4"/> Se Déconnecter
           </Button>
         </div>
       )}
 
-      {/* ... (Rest of tabs remain identical but correct divs are used) ... */}
+      {/* ... (Shopping & Addresses Tabs remain unchanged) ... */}
       {activeTab === 'shopping' && (
         <div className="space-y-4 animate-slide-up">
           <Card className="p-4 bg-yellow-50 border-yellow-100">

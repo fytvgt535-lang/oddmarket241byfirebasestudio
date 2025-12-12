@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Sparkles, History, Clock, Trash2, Mic, MicOff, Check, RefreshCw, X, Save, ShoppingCart } from 'lucide-react';
 import { SmartListItem, ProductOffer, SmartListHistory } from '../../types';
 import { parseShoppingListText } from '../../utils/smartShopperEngine';
+import { syncShopperData } from '../../services/localShopperDatabase'; // Import Sync
 import { formatCurrency } from '../../utils/coreUtils';
 import { Button } from '../ui/Button';
 import { TextArea, Input } from '../ui/Input';
@@ -26,8 +27,11 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
   // Voice State
   const [isListening, setIsListening] = useState(false);
 
-  // 1. Load History & Draft from LocalStorage on mount
+  // 1. Load History & Draft & SYNC DATA
   useEffect(() => {
+      // Trigger background sync of REAL data
+      syncShopperData().catch(e => console.warn("Background sync failed", e));
+
       try {
           const savedHistory = localStorage.getItem('smart_shopper_history');
           if (savedHistory) setHistory(JSON.parse(savedHistory));
@@ -57,21 +61,24 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
       }
   }, [analyzedItems, inputText, listName]);
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (!inputText.trim()) {
         toast.error("Veuillez écrire ou dicter une liste.");
         return;
     }
     setIsAnalyzing(true);
     
+    // Force a fresh sync before analysis if online to get latest prices
+    if (navigator.onLine) await syncShopperData();
+
     // Simulation du temps de calcul IA
     setTimeout(() => {
         const results = parseShoppingListText(inputText);
         setAnalyzedItems(results);
         setIsAnalyzing(false);
-        if (results.length === 0) toast.error("Je n'ai pas compris les produits. Essayez des mots simples.");
-        else toast.success(`${results.length} produits identifiés !`);
-    }, 1200);
+        if (results.length === 0) toast.error("Je n'ai pas compris les produits ou le catalogue est vide.");
+        else toast.success(`${results.length} produits identifiés dans le catalogue réel !`);
+    }, 800);
   };
 
   const handleSelectOffer = (itemId: string, offerId: string) => {
@@ -89,11 +96,8 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
 
   const handleValidateSelection = () => {
       if (!analyzedItems || analyzedItems.length === 0) return;
-      
       if (onValidate) {
           onValidate(analyzedItems);
-          // On ne vide pas la liste ici pour laisser l'utilisateur voir ce qu'il a fait,
-          // mais le parent (ClientDashboard) va rediriger vers le panier.
       } else {
           toast.error("Erreur de connexion au panier.");
       }
@@ -126,7 +130,6 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
       setIsAnalyzing(true);
       setShowHistory(false);
       
-      // Re-analyze to get FRESH prices
       setTimeout(() => {
           const results = parseShoppingListText(entry.originalText);
           setAnalyzedItems(results);
@@ -183,7 +186,6 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
       recognition.start();
   };
 
-  // Calcul du total en temps réel
   const totalEstimatif = useMemo(() => {
       if (!analyzedItems) return 0;
       return analyzedItems.reduce((sum, item) => {
@@ -233,7 +235,7 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
                 <div className="relative z-10 flex justify-between items-start mb-4">
                     <div>
                         <h2 className="text-2xl font-black mb-1">Assistant Shopping</h2>
-                        <p className="text-indigo-100 text-sm max-w-xs">Optimisez vos courses avec l'IA.</p>
+                        <p className="text-indigo-100 text-sm max-w-xs">Connecté au stock réel des marchés.</p>
                     </div>
                     <Button size="sm" variant="ghost" className="text-white bg-white/10 hover:bg-white/20" onClick={() => setShowHistory(true)}>
                         <History className="w-4 h-4 mr-2"/> Historique
@@ -264,7 +266,7 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
                         disabled={!inputText.trim()}
                         className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2"
                     >
-                        {isAnalyzing ? "Analyse..." : <><Sparkles className="w-5 h-5"/> Trouver les meilleurs prix</>}
+                        {isAnalyzing ? "Recherche en cours..." : <><Sparkles className="w-5 h-5"/> Comparer les prix réels</>}
                     </Button>
                 </div>
             </div>
@@ -317,7 +319,7 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
                             {/* Swipeable Offers */}
                             {item.offers.length === 0 ? (
                                 <div className="bg-gray-50 p-4 rounded-xl text-center text-gray-400 text-sm border-2 border-dashed border-gray-200">
-                                    Désolé, aucune offre trouvée pour ce produit aujourd'hui.
+                                    Aucune offre trouvée dans les stocks actuels.
                                 </div>
                             ) : (
                                 <div className="flex overflow-x-auto gap-4 pb-4 px-2 snap-x snap-mandatory no-scrollbar">

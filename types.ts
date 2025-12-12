@@ -15,13 +15,14 @@ export interface MarketSchedule {
   [key: string]: DaySchedule; // lundi, mardi, etc.
 }
 
-// --- AUDIT & SECURITY ---
+// --- AUDIT & SECURITY (UPDATED FOR GOD'S EYE) ---
 export interface AuditLog {
   id: string;
   actorId: string;
   actorName?: string;
   targetId: string;
   action: string;
+  // Critical for disputes: What was it before?
   oldValue?: any;
   newValue?: any;
   reason?: string;
@@ -32,6 +33,7 @@ export interface AuditLog {
     os?: string;
     location?: string;
     userAgent?: string;
+    isOfflineSync?: boolean; // Traceability of delayed uploads
   };
   created_at?: string;
   createdAt: number;
@@ -256,6 +258,7 @@ export interface Sanction {
   id: string;
   vendorId: string;
   marketId: string;
+  stallId?: string;
   type: 'warning' | 'fine' | 'suspension';
   infractionId?: string;
   reason: string;
@@ -462,16 +465,6 @@ export interface VendorProfile {
   subscriptionPlan?: 'standard' | 'premium';
   subscriptionHistory?: SubscriptionHistory[];
 }
-
-export const PREDEFINED_INFRACTIONS = [
-  { id: 'HYG_01', label: 'Défaut d\'hygiène (Déchets)', amount: 5000 },
-  { id: 'HYG_02', label: 'Eaux usées sur voie publique', amount: 10000 },
-  { id: 'OCC_01', label: 'Débordement étal (Ligne jaune)', amount: 15000 },
-  { id: 'OCC_02', label: 'Obstruction allée sécurité', amount: 25000 },
-  { id: 'ADM_01', label: 'Absence de badge vendeur', amount: 2000 },
-  { id: 'ADM_02', label: 'Défaut carnet de santé', amount: 5000 },
-  { id: 'DIV_99', label: 'Autre (Saisie Manuelle)', amount: 0 }
-];
 
 export interface VendorDashboardProps {
   profile: VendorProfile;

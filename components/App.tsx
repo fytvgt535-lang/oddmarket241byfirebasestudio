@@ -9,13 +9,7 @@ import { useAppData } from './hooks/useAppData';
 import * as SupabaseService from './services/supabaseService';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatus from './components/NetworkStatus';
-
-// Lazy Components
-const AdminDashboard = React.lazy(() => import('./components/AdminDashboard'));
-const VendorDashboard = React.lazy(() => import('./components/VendorDashboard'));
-const ClientDashboard = React.lazy(() => import('./components/ClientDashboard'));
-const AgentFieldTool = React.lazy(() => import('./components/AgentFieldTool'));
-const MediatorDashboard = React.lazy(() => import('./components/MediatorDashboard'));
+import RoleBasedRouter from './components/RoleBasedRouter';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -41,33 +35,49 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- REALTIME USER PROFILE SYNC (Essential for Agent Cash updates) ---
+  // --- REALTIME USER PROFILE SYNC (KILL SWITCH & LIVE UPDATES) ---
   useEffect(() => {
       if (!currentUser) return;
 
       const channel = supabase
-          .channel(`profile-${currentUser.id}`)
+          .channel(`profile-watch-${currentUser.id}`)
           .on('postgres_changes', { 
               event: 'UPDATE', 
               schema: 'public', 
               table: 'profiles', 
               filter: `id=eq.${currentUser.id}` 
-          }, (payload) => {
-              // Merge updates into current user state
-              setCurrentUser((prev: any) => ({ ...prev, ...payload.new, agentStats: payload.new.agent_stats }));
-              toast.success("Profil mis à jour", { icon: '🔄', duration: 2000 });
+          }, async (payload) => {
+              const newData = payload.new;
+              
+              // 1. SECURITY KILL SWITCH
+              if (newData.is_banned && !currentUser.isBanned) {
+                  toast.error("Votre compte a été suspendu par l'administration.", { duration: 10000, icon: '🚫' });
+                  await SupabaseService.signOutUser();
+                  setAuthView('login');
+                  return;
+              }
+
+              // 2. LIVE UPDATES (Role change, Agent Stats, etc.)
+              setCurrentUser((prev: any) => ({ 
+                  ...prev, 
+                  ...newData, 
+                  agentStats: newData.agent_stats 
+              }));
+
+              if (newData.role !== currentUser.role) {
+                  toast(`Vos droits d'accès ont changé : ${newData.role}`, { icon: '🔄' });
+              }
           })
           .subscribe();
 
       return () => {
           supabase.removeChannel(channel);
       };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.isBanned, currentUser?.role]);
 
   const fetchUserProfile = async (userId: string) => {
       const profile = await SupabaseService.getCurrentUserProfile(userId);
       setCurrentUser(profile);
-      // Set language from profile if available
       if (profile?.preferences?.language && (profile.preferences.language === 'fr' || profile.preferences.language === 'en')) {
           setCurrentLanguage(profile.preferences.language as any);
       }
@@ -101,38 +111,23 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = async () => {
-      // SECURITY CHECK: Anti-Fraud
       if (currentUser?.role === 'agent' && currentUser?.agentStats?.isShiftActive) {
-          toast.error("INTERDIT: Vous devez terminer votre service avant de vous déconnecter.", { 
-              duration: 5000, 
-              style: { border: '2px solid red', padding: '16px', color: 'red' } 
-          });
-          return;
+          const confirmLogout = window.confirm("ATTENTION : Vous êtes en service. Se déconnecter maintenant créera une alerte d'abandon de poste. Continuer ?");
+          if (!confirmLogout) return;
       }
-
-      await SupabaseService.signOutUser();
-      setAuthView('login');
+      
+      try {
+          await SupabaseService.signOutUser();
+      } catch (e: any) {
+          console.error("Logout Error:", e);
+          // Force logout locally even if server fails
+      } finally {
+          setSession(null);
+          setCurrentUser(null);
+          setAuthView('login');
+          window.location.reload(); // Hard refresh to clear any lingering state
+      }
   };
-
-  // --- DERIVED STATE ---
-  const currentVendorProfile = currentUser?.role === 'vendor' ? {
-      ...currentUser,
-      hygieneScore: 4.5,
-      subscriptionPlan: 'standard'
-  } : null;
-
-  const currentAgent = currentUser?.role === 'agent' ? {
-      ...currentUser,
-      marketId: 'm1',
-      cashInHand: currentUser.agentStats?.cashInHand || 0,
-      isShiftActive: !!currentUser.agentStats?.isShiftActive,
-      logs: []
-  } : null;
-
-  // Filter missions for the logged-in agent
-  const agentMissions = currentUser?.role === 'agent' 
-      ? data.missions.filter(m => m.agentId === currentUser.id)
-      : [];
 
   if (isDataLoading && session) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-12 h-12 text-blue-600 animate-spin"/></div>;
   if (!session) return authView === 'login' ? <LoginScreen onLogin={handleLogin} onGoToRegister={() => setAuthView('register')} isLoading={isAuthLoading} onGuestAccess={()=>{}}/> : <RegisterScreen onRegister={handleRegister} onBackToLogin={() => setAuthView('login')} isLoading={isAuthLoading}/>;
@@ -150,7 +145,6 @@ const App: React.FC = () => {
                   <h1 className={`font-black ${currentUser.role === 'client' ? 'text-slate-900' : 'text-white'}`}>MarchéConnect</h1>
               </div>
               <div className="flex items-center gap-4">
-                  {/* LANGUAGE TOGGLE */}
                   <button 
                     onClick={() => setCurrentLanguage(prev => prev === 'fr' ? 'en' : 'fr')}
                     className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold uppercase transition-colors ${currentUser.role === 'client' ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white hover:bg-white/20'}`}
@@ -158,7 +152,7 @@ const App: React.FC = () => {
                       <Globe className="w-3 h-3"/>
                       {currentLanguage === 'fr' ? 'Français' : 'English'}
                   </button>
-                  <button onClick={handleSignOut} className={`opacity-80 hover:opacity-100 ${currentUser.role === 'agent' && currentUser.agentStats?.isShiftActive ? 'opacity-30 cursor-not-allowed' : ''}`}>
+                  <button onClick={handleSignOut} className={`opacity-80 hover:opacity-100 ${currentUser.role === 'agent' && currentUser.agentStats?.isShiftActive ? 'text-red-300' : ''}`} title="Déconnexion">
                       <LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/>
                   </button>
               </div>
@@ -168,90 +162,16 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto p-4">
         <ErrorBoundary>
           <Suspense fallback={<div className="p-10 text-center text-gray-400">Chargement module...</div>}>
-            
-            {currentUser.role === 'admin' && (
-                <AdminDashboard 
-                    markets={data.markets} stalls={data.stalls} reports={data.reports} 
-                    transactions={data.recentTransactions} receipts={data.receipts} agents={data.agents} 
-                    expenses={data.expenses} paymentPlans={data.paymentPlans} notifications={data.notifications} 
-                    sanctions={data.sanctions} users={data.users} orders={data.orders} 
-                    
-                    // NEW: Pass loading states & language down
-                    loadingStates={loadingStates}
-                    onLoadFinance={lazyLoaders.loadFinance}
-                    onLoadUsers={lazyLoaders.loadUsers}
-                    onLoadMissions={lazyLoaders.loadMissions}
-                    currentLanguage={currentLanguage}
-
-                    onSendSms={() => {}} onApprovePlan={() => {}} 
-                    onAddMarket={actions.createMarket} 
-                    onUpdateMarket={actions.updateMarket} 
-                    onDeleteMarket={actions.deleteMarket} 
-                    onCreateStall={actions.createStall} 
-                    onBulkCreateStalls={actions.bulkCreateStalls} 
-                    onDeleteStall={actions.deleteStall} 
-                    onAddExpense={actions.createExpense} 
-                    onDeleteExpense={actions.deleteExpense} 
-                    onUpdateUserStatus={actions.updateUserStatus}
-                    
-                    // Connected Agent Actions
-                    onAssignMission={actions.assignMission}
-                    onValidateCashDrop={actions.validateCashDrop}
-                />
-            )}
-
-            {currentUser.role === 'vendor' && (
-                <VendorDashboard 
-                    profile={currentVendorProfile} transactions={data.recentTransactions} receipts={data.receipts} 
-                    myStall={data.stalls.find(s => s.occupantId === currentUser.id)} stalls={data.stalls} 
-                    myReports={data.reports} sanctions={data.sanctions} products={data.products} orders={data.orders} 
-                    notifications={data.notifications} 
-                    
-                    onAddProduct={actions.createProduct} 
-                    onUpdateProduct={actions.updateProduct} 
-                    onDeleteProduct={actions.deleteProduct} 
-                    onUpdateOrderStatus={actions.updateOrderStatus} 
-                    onUpdateProfile={u => SupabaseService.updateUserProfile(currentUser.id, u).then(()=>fetchUserProfile(currentUser.id))} 
-                    onToggleLogistics={() => Promise.resolve()} 
-                    onReserve={(id, p, prio) => SupabaseService.reserveStall(id, currentUser.id).then(() => actions.updateMarket(id, {}))} 
-                    onContestSanction={(id, r) => SupabaseService.contestSanction(id, r)}
-                />
-            )}
-
-            {currentUser.role === 'client' && (
-                <ClientDashboard 
-                    stalls={data.stalls} markets={data.markets} products={data.products} orders={data.orders.filter(o => o.customerId === currentUser.id)}
-                    onCreateOrder={actions.createOrder} 
-                />
-            )}
-
-            {currentUser.role === 'agent' && (
-                <AgentFieldTool 
-                    stalls={data.stalls} sanctions={data.sanctions} agentLogs={currentAgent.logs} 
-                    missions={agentMissions} // Pass filtered missions
-                    cashInHand={currentAgent.cashInHand} isShiftActive={currentAgent.isShiftActive} 
-                    onCollectPayment={(id, amt) => SupabaseService.createTransaction({ marketId: 'm1', amount: amt, type: 'rent', provider: 'cash', stallId: id, collectedBy: currentUser.id }).then(() => {})} 
-                    onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: 'm1', stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
-                    onShiftAction={(action) => {
-                        // Handle shift start/end logic
-                        if (action === 'start') {
-                            SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: true } });
-                        } else if (action === 'end') {
-                            SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: false } });
-                        }
-                    }} 
-                    onUpdateMissionStatus={actions.updateMissionStatus}
-                />
-            )}
-
-            {currentUser.role === 'mediator' && (
-                <MediatorDashboard 
-                    sanctions={data.sanctions} 
-                    stalls={data.stalls}
-                    onResolveAppeal={(id, decision) => SupabaseService.resolveSanctionAppeal(id, decision).then(()=> {})}
-                />
-            )}
-
+            <RoleBasedRouter 
+              currentUser={currentUser}
+              data={data}
+              loadingStates={loadingStates}
+              lazyLoaders={lazyLoaders}
+              actions={actions}
+              currentLanguage={currentLanguage}
+              onUpdateProfile={u => SupabaseService.updateUserProfile(currentUser.id, u).then(()=>fetchUserProfile(currentUser.id))}
+              onSignOut={handleSignOut}
+            />
           </Suspense>
         </ErrorBoundary>
       </main>

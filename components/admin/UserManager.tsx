@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, ShieldCheck, Ban, CheckCircle, Clock, X, Users, Building2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { Search, ShieldCheck, Ban, CheckCircle, Clock, X, Users, Building2, ChevronLeft, ChevronRight, Loader2, Edit3 } from 'lucide-react';
 import { User, AppRole, Stall, Sanction, Market } from '../../types';
 import toast from 'react-hot-toast';
 import { Button } from '../ui/Button';
@@ -96,7 +96,7 @@ const UserManager: React.FC<UserManagerProps> = ({ stalls, markets, sanctions, o
             onClose={() => setIsSecureModalOpen(false)}
             onConfirm={confirmStatusUpdate}
             title={t(currentLanguage, 'confirm')}
-            description="Modification de compte utilisateur."
+            description="Modification sensible de compte (Rôle/Statut)."
             email={currentUserEmail}
         />
 
@@ -114,6 +114,7 @@ const UserManager: React.FC<UserManagerProps> = ({ stalls, markets, sanctions, o
                             <option value="vendor">Vendeur</option>
                             <option value="agent">Agent</option>
                             <option value="admin">Admin</option>
+                            <option value="client">Client</option>
                         </Select>
                     </div>
                     <div>
@@ -166,8 +167,23 @@ const UserManager: React.FC<UserManagerProps> = ({ stalls, markets, sanctions, o
                                     </td>
                                     <td className="p-4">
                                         <div className="flex flex-col">
-                                            <span className="font-bold text-gray-800 capitalize">{user.role}</span>
-                                            {userMarket ? <span className="text-xs text-gray-500 flex items-center gap-1"><Building2 className="w-3 h-3"/> {userMarket.name}</span> : <span className="text-xs text-gray-400 italic">Non assigné</span>}
+                                            {/* ROLE SELECTOR */}
+                                            <div className="flex items-center gap-1 group relative w-fit">
+                                                <select
+                                                    className="appearance-none font-bold text-gray-800 capitalize bg-transparent border-b border-dashed border-gray-300 hover:border-blue-500 cursor-pointer text-sm py-0.5 outline-none transition-colors pr-4"
+                                                    value={user.role}
+                                                    onChange={(e) => initiateStatusUpdate(user.id, { role: e.target.value as any })}
+                                                >
+                                                    <option value="client">Client</option>
+                                                    <option value="vendor">Vendeur</option>
+                                                    <option value="agent">Agent</option>
+                                                    <option value="mediator">Médiateur</option>
+                                                    <option value="admin">Admin</option>
+                                                </select>
+                                                <Edit3 className="w-3 h-3 text-gray-400 absolute right-0 pointer-events-none"/>
+                                            </div>
+                                            
+                                            {userMarket ? <span className="text-xs text-gray-500 flex items-center gap-1 mt-1"><Building2 className="w-3 h-3"/> {userMarket.name}</span> : <span className="text-xs text-gray-400 italic mt-1">Non assigné</span>}
                                         </div>
                                     </td>
                                     <td className="p-4">

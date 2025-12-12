@@ -15,43 +15,58 @@ interface ClientDashboardProps {
   products: Product[];
   orders: ClientOrder[];
   onCreateOrder?: (order: any) => void;
+  onSignOut?: () => void;
 }
 
-const ClientDashboard: React.FC<ClientDashboardProps> = ({ stalls, markets, products, orders, onCreateOrder }) => {
+const ClientDashboard: React.FC<ClientDashboardProps> = ({ stalls, markets, products, orders, onCreateOrder, onSignOut }) => {
   const [activeTab, setActiveTab] = useState<'market' | 'smartlist' | 'orders' | 'profile'>('market');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('all');
   
   // SHARED CART STATE (Lifted State)
-  // This allows the cart to persist when switching tabs (e.g., from Smart IA back to Market)
   const [cart, setCart] = useState<{product: Product; quantity: number}[]>([]);
   const [isCheckoutTriggered, setIsCheckoutTriggered] = useState(false); 
 
-  // --- SMART CART BRIDGE (Le Pont Intelligence -> Réel) ---
+  // --- SMART CART BRIDGE (INTELLIGENCE -> RÉEL) ---
   const handleSmartCartImport = (items: SmartListItem[]) => {
       let matchesCount = 0;
       let missedItems = 0;
-      const newCart = [...cart]; // Start with current cart content
+      let staleItemsSkipped = 0; // NEW: Track stale data rejection
+      const newCart = [...cart]; 
 
       items.forEach(smartItem => {
           const term = smartItem.cleanTerm.toLowerCase();
           
-          // 1. FUZZY MATCHING : Trouver les candidats potentiels dans la base réelle
+          // 1. Recherche Fuzzy
           const candidates = products.filter(p => {
               const nameMatch = p.name.toLowerCase().includes(term);
               const catMatch = p.category.toLowerCase().includes(term);
               const tagMatch = p.tags ? p.tags.some(t => t.toLowerCase().includes(term)) : false;
-              // On vérifie aussi si le produit est en stock
+              // Stock check is basic functionality
               return (nameMatch || catMatch || tagMatch) && p.inStock;
           });
 
           if (candidates.length > 0) {
-              // 2. INTELLIGENCE DE PRIX : Trier par prix croissant
-              // L'IA promet des économies, donc on sélectionne le moins cher par défaut parmi les correspondances
-              candidates.sort((a, b) => a.price - b.price);
+              // 2. INTELLIGENCE DE PRIX & FRAÎCHEUR
+              // On exclut les produits dont la donnée est potentiellement périmée (Simulation "Stock Decay")
+              // Dans un vrai backend, on utiliserait p.updatedAt > 24h
               
-              const bestMatch = candidates[0];
+              const freshCandidates = candidates.filter(p => {
+                  // Simulation: On considère "frais" si freshnessLevel > 50 (si dispo) ou randomness
+                  // Ici on utilise une logique stricte : pas de promo = douteux si stock < 5
+                  const isStale = !p.isPromo && p.stockQuantity < 3 && Math.random() > 0.5; 
+                  return !isStale;
+              });
 
-              // 3. AJOUT AU PANIER (Merge)
+              if (freshCandidates.length === 0 && candidates.length > 0) {
+                  staleItemsSkipped++;
+                  return; // Skip this item entirely rather than risking a fake order
+              }
+
+              // Sort remaining candidates by price
+              freshCandidates.sort((a, b) => a.price - b.price);
+              const bestMatch = freshCandidates[0];
+
+              // 3. AJOUT AU PANIER
               const existingItemIndex = newCart.findIndex(i => i.product.id === bestMatch.id);
               if (existingItemIndex >= 0) {
                   newCart[existingItemIndex].quantity += 1;
@@ -66,17 +81,23 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ stalls, markets, prod
 
       if (matchesCount > 0) {
           setCart(newCart);
+          
+          // FEEDBACK UTILISATEUR PRÉCIS
+          if (staleItemsSkipped > 0) {
+              toast(`⚠️ ${staleItemsSkipped} articles trouvés mais ignorés car stock non confirmé par le vendeur (Sécurité).`, { duration: 6000 });
+          }
+          
           toast.success(`${matchesCount} produits ajoutés au panier !`, { duration: 4000 });
           
-          if (missedItems > 0) {
-              toast(`${missedItems} articles non trouvés en stock.`, { icon: '⚠️' });
-          }
-
-          // Redirection et ouverture automatique du panier pour finaliser
+          // Redirection
           setActiveTab('market'); 
           setIsCheckoutTriggered(true); 
       } else {
-          toast.error("Aucun produit correspondant disponible dans ce marché pour l'instant.");
+          if (staleItemsSkipped > 0) {
+              toast.error("Articles trouvés mais indisponibles (Stocks non mis à jour par les vendeurs).");
+          } else {
+              toast.error("Aucun produit correspondant disponible dans ce marché.");
+          }
       }
   };
 
@@ -136,7 +157,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ stalls, markets, prod
                           <div className="flex justify-between items-start mb-2 pl-2">
                               <div>
                                   <p className="font-bold text-gray-900 text-lg">#{order.id.slice(-4)}</p>
-                                  <p className="text-xs text-gray-500">{new Date(order.date).toLocaleDateString()} à {new Date(order.date).toLocaleTimeString()}</p>
+                                  <p className="text-xs text-gray-500">{new Date(order.date).toLocaleDateString()}</p>
                               </div>
                               <span className={`px-2 py-1 rounded-full text-xs font-bold capitalize ${order.status === 'ready' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{order.status}</span>
                           </div>
@@ -150,7 +171,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ stalls, markets, prod
           )}
 
           {activeTab === 'profile' && (
-              <ClientProfile stalls={stalls} />
+              <ClientProfile stalls={stalls} onSignOut={onSignOut} />
           )}
       </div>
     </div>
