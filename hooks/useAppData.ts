@@ -1,7 +1,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as SupabaseService from '../services/supabaseService';
-import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, AppNotification, Mission, Agent, Receipt, PaymentPlan } from '../types';
+import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, AppNotification, Mission, Agent, Receipt, PaymentPlan, ProductCategory } from '../types';
+import { PRODUCT_CATEGORIES as DEFAULT_CATEGORIES } from '../constants/appConstants';
 
 export const useAppData = (session: any, currentUser: User | null) => {
     const [data, setData] = useState({
@@ -17,9 +18,11 @@ export const useAppData = (session: any, currentUser: User | null) => {
         missions: [] as Mission[],
         receipts: [] as Receipt[],
         expenses: [] as Expense[],
-        paymentPlans: [] as PaymentPlan[], // Data store for debt management
+        paymentPlans: [] as PaymentPlan[],
         notifications: [] as AppNotification[],
-        financialStats: null
+        financialStats: null,
+        // NEW: Dynamic Categories (Started with defaults)
+        productCategories: DEFAULT_CATEGORIES as unknown as ProductCategory[]
     });
 
     const [isDataLoading, setIsGlobalLoading] = useState(true);
@@ -44,8 +47,17 @@ export const useAppData = (session: any, currentUser: User | null) => {
             const { data: stalls } = await SupabaseService.fetchStalls({ limit: 100 });
             const { transactions: recentTransactions } = await SupabaseService.fetchTransactions(1, 10);
             
-            // Payment Plans (Vital for rigorous debt management)
+            // Payment Plans
             const paymentPlans = await SupabaseService.fetchPaymentPlans();
+
+            // Simulate loading dynamic categories from DB/Storage
+            const storedCats = localStorage.getItem('mc_custom_categories');
+            let categories = [...DEFAULT_CATEGORIES];
+            if (storedCats) {
+                try {
+                    categories = JSON.parse(storedCats);
+                } catch(e) {}
+            }
 
             // Role specific data
             let products: Product[] = [];
@@ -61,7 +73,9 @@ export const useAppData = (session: any, currentUser: User | null) => {
                 stalls,
                 recentTransactions,
                 products,
-                paymentPlans
+                paymentPlans,
+                // @ts-ignore
+                productCategories: categories as ProductCategory[]
             }));
 
         } catch (error: any) {
@@ -139,6 +153,23 @@ export const useAppData = (session: any, currentUser: User | null) => {
         deleteStall: async (id: string) => {
             await SupabaseService.deleteStall(id);
             setData(prev => ({ ...prev, stalls: prev.stalls.filter(s => s.id !== id) }));
+        },
+
+        // CATEGORY ACTIONS (NEW)
+        createCategory: (cat: Omit<ProductCategory, 'id'>) => {
+            const newCat = { ...cat, id: cat.label.toLowerCase().replace(/\s+/g, '_') };
+            setData(prev => {
+                const nextCats = [...prev.productCategories, newCat];
+                localStorage.setItem('mc_custom_categories', JSON.stringify(nextCats));
+                return { ...prev, productCategories: nextCats };
+            });
+        },
+        deleteCategory: (id: string) => {
+            setData(prev => {
+                const nextCats = prev.productCategories.filter(c => c.id !== id);
+                localStorage.setItem('mc_custom_categories', JSON.stringify(nextCats));
+                return { ...prev, productCategories: nextCats };
+            });
         },
 
         // PRODUCT ACTIONS

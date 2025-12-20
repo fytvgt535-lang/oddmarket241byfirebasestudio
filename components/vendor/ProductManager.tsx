@@ -1,31 +1,36 @@
+
 import React, { useState, useMemo } from 'react';
-import { Product, Stall, VendorProfile } from '../../types';
+import { Product, Stall, VendorProfile, ProductCategory } from '../../types';
 import { Search, Plus, ArrowUpDown, LayoutGrid, List, Edit, EyeOff, Minus, Trash2, Zap, AlertCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
 import { Card, CardContent } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { PRODUCT_CATEGORIES } from '../../constants/appConstants';
-import { ImageUploader } from '../ui/ImageUploader'; // NEW
+import { PRODUCT_CATEGORIES as DEFAULT_CATS } from '../../constants/appConstants';
+import { ImageUploader } from '../ui/ImageUploader';
 
 interface ProductManagerProps {
   products: Product[];
   myStall?: Stall;
   profile: VendorProfile;
+  productCategories?: ProductCategory[]; // NEW
   onAddProduct: (product: Omit<Product, 'id'>) => Promise<any>;
   onUpdateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   onDeleteProduct: (id: string) => void;
 }
 
-const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAddProduct, onUpdateProduct }) => {
+const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, productCategories = [], onAddProduct, onUpdateProduct }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Use passed categories or fall back to constants
+  const availableCategories = productCategories.length > 0 ? productCategories : DEFAULT_CATS;
+
   // Form State
   const [form, setForm] = useState({ 
-      name: '', price: '', category: 'vivres', quantity: '1', description: '', imageUrl: ''
+      name: '', price: '', category: availableCategories[0].id, quantity: '1', description: '', imageUrl: ''
   });
 
   const handleOpenModal = (product?: Product) => {
@@ -41,7 +46,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
           });
       } else {
           setEditingProduct(null);
-          setForm({ name: '', price: '', category: 'vivres', quantity: '10', description: '', imageUrl: '' });
+          setForm({ name: '', price: '', category: availableCategories[0].id, quantity: '10', description: '', imageUrl: '' });
       }
       setIsModalOpen(true);
   };
@@ -61,7 +66,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
               inStock: Number(form.quantity) > 0,
               description: form.description,
               imageUrl: form.imageUrl,
-              unit: 'unité', // Simplified
+              unit: 'unité', 
               isVisible: true
           };
 
@@ -105,6 +110,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                             <span className="text-xs text-gray-500 font-bold">Stock: {p.stockQuantity}</span>
+                            <Badge className="text-[10px]">{availableCategories.find(c => c.id === p.category)?.label || p.category}</Badge>
                         </div>
                     </div>
                 </Card>
@@ -134,7 +140,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, myStall, onAd
                                 <Input label="Quantité" type="number" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} />
                             </div>
                             <Select label="Catégorie" value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
-                                {PRODUCT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                {availableCategories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                             </Select>
                             
                             <Button type="submit" isLoading={isSubmitting} className="w-full bg-purple-600 hover:bg-purple-700">Enregistrer</Button>

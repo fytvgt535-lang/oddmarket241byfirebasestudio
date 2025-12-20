@@ -13,11 +13,11 @@ export const MARKET_BANNERS = [
 ];
 
 // --- CATÉGORIES PRODUITS ---
-export const PRODUCT_CATEGORIES: { id: ProductType; label: string; imageBase: string }[] = [
-  { id: 'vivres', label: 'Vivres Frais', imageBase: 'https://images.unsplash.com/photo-1488459716781-31db52582fe9' },
-  { id: 'textile', label: 'Textile & Mode', imageBase: 'https://images.unsplash.com/photo-1520006403909-838d6b92c22e' },
-  { id: 'electronique', label: 'Électronique', imageBase: 'https://images.unsplash.com/photo-1550009158-9ebf69173e03' },
-  { id: 'divers', label: 'Divers / Artisanat', imageBase: 'https://images.unsplash.com/photo-1531297461136-82lw9b44d94l' }
+export const PRODUCT_CATEGORIES: { id: ProductType; label: string; imageBase: string; color: string }[] = [
+  { id: 'vivres', label: 'Vivres Frais', imageBase: 'https://images.unsplash.com/photo-1488459716781-31db52582fe9', color: 'bg-green-100 text-green-700 border-green-200' },
+  { id: 'textile', label: 'Textile & Mode', imageBase: 'https://images.unsplash.com/photo-1520006403909-838d6b92c22e', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  { id: 'electronique', label: 'Électronique', imageBase: 'https://images.unsplash.com/photo-1550009158-9ebf69173e03', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  { id: 'divers', label: 'Divers / Artisanat', imageBase: 'https://images.unsplash.com/photo-1531297461136-82lw9b44d94l', color: 'bg-gray-100 text-gray-700 border-gray-200' }
 ];
 
 // --- MODES DE PAIEMENT ---

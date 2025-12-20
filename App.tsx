@@ -92,8 +92,8 @@ const App: React.FC = () => {
   const currentAgent = currentUser?.role === 'agent' ? {
       ...currentUser,
       marketId: 'm1',
-      cashInHand: 45000,
-      isShiftActive: true,
+      cashInHand: currentUser.agentStats?.cashInHand || 0,
+      isShiftActive: !!currentUser.agentStats?.isShiftActive,
       logs: []
   } : null;
 
@@ -184,10 +184,24 @@ const App: React.FC = () => {
             {currentUser.role === 'agent' && (
                 <AgentFieldTool 
                     stalls={data.stalls} sanctions={data.sanctions} agentLogs={currentAgent.logs} 
+                    missions={data.missions.filter(m => m.agentId === currentUser.id)}
+                    transactions={data.recentTransactions.filter(t => t.collectedBy === currentUser.id)}
                     cashInHand={currentAgent.cashInHand} isShiftActive={currentAgent.isShiftActive} 
                     onCollectPayment={(id, amt) => SupabaseService.createTransaction({ marketId: 'm1', amount: amt, type: 'rent', provider: 'cash', stallId: id, collectedBy: currentUser.id }).then(() => {})} 
                     onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: 'm1', stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
-                    onShiftAction={()=>{}} 
+                    onShiftAction={async (action) => {
+                        if (action === 'start') await SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: true } });
+                        else if (action === 'end') await SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: false } });
+                        else if (action === 'sos') await SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, status: 'SOS' } });
+                        else if (action === 'deposit') {
+                            // Simulation de la validation du dépôt par le régisseur
+                            await SupabaseService.validateAgentDeposit(currentUser.id, currentAgent.cashInHand);
+                            toast.success("Dépôt validé par le QG (Simulation)");
+                        }
+                        // Rafraîchir le profil pour mettre à jour l'interface (cashInHand = 0)
+                        await fetchUserProfile(currentUser.id);
+                    }} 
+                    onUpdateMissionStatus={actions.updateMissionStatus}
                 />
             )}
 

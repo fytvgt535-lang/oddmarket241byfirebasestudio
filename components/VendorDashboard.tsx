@@ -15,7 +15,7 @@ interface ExtendedVendorDashboardProps extends VendorDashboardProps {
     onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
 }
 
-const VendorDashboard: React.FC<ExtendedVendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, markets = [], onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve, onContestSanction, onRequestPlan }) => {
+const VendorDashboard: React.FC<ExtendedVendorDashboardProps> = ({ profile, transactions, myStall, stalls, sanctions, products, notifications, markets = [], productCategories, onAddProduct, onUpdateProduct, onDeleteProduct, onUpdateProfile, onToggleLogistics, onReserve, onContestSanction, onRequestPlan }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'explore' | 'store' | 'logistics' | 'settings'>('overview');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -93,7 +93,7 @@ const VendorDashboard: React.FC<ExtendedVendorDashboardProps> = ({ profile, tran
             onShowMap={() => setActiveTab('explore')} 
             onSpeak={() => {}} 
             onContestSanction={onContestSanction}
-            onRequestPlan={onRequestPlan} // Pass down
+            onRequestPlan={onRequestPlan} 
           />
       )}
       
@@ -105,7 +105,17 @@ const VendorDashboard: React.FC<ExtendedVendorDashboardProps> = ({ profile, tran
           />
       )}
 
-      {activeTab === 'store' && <ProductManager products={products} myStall={myStall} profile={profile} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onDeleteProduct={onDeleteProduct} />}
+      {activeTab === 'store' && (
+          <ProductManager 
+            products={products} 
+            myStall={myStall} 
+            profile={profile} 
+            productCategories={productCategories} // Pass down
+            onAddProduct={onAddProduct} 
+            onUpdateProduct={onUpdateProduct} 
+            onDeleteProduct={onDeleteProduct} 
+          />
+      )}
       
       {activeTab === 'logistics' && (
            <div className={`rounded-3xl p-6 relative overflow-hidden text-white shadow-lg animate-fade-in ${profile.isLogisticsSubscribed ? 'bg-orange-500' : 'bg-slate-800'}`}>

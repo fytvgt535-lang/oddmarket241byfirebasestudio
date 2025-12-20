@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { Stall, Market } from '../../types';
+import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2, ChevronLeft, ChevronRight, Loader2, UserPlus } from 'lucide-react';
+import { Stall, Market, ProductCategory, User } from '../../types';
 import toast from 'react-hot-toast';
 import StallDigitalTwin from '../StallDigitalTwin';
 import { Button } from '../ui/Button';
@@ -11,15 +11,17 @@ import { Badge } from '../ui/Badge';
 import { fetchStalls } from '../../services/supabaseService';
 
 interface StallManagerProps {
-  stalls: Stall[]; // Legacy prop, used for stats if small, else ignored
+  stalls: Stall[]; // Legacy prop
   markets: Market[];
+  categories: ProductCategory[];
+  users: User[]; // New prop for assignments
   onCreateStall: (stall: Omit<Stall, 'id'>) => void;
   onBulkCreateStalls: (stalls: Omit<Stall, 'id'>[]) => void;
   onDeleteStall: (id: string) => void;
   currentLanguage: string;
 }
 
-const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
+const StallManager: React.FC<StallManagerProps> = ({ markets, categories, users, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
   // Server-side State
   const [paginatedStalls, setPaginatedStalls] = useState<Stall[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -38,9 +40,13 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
   const [selectedStallTwin, setSelectedStallTwin] = useState<Stall | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Forms
-  const [newForm, setNewForm] = useState({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: 'divers' });
-  const [bulkForm, setBulkForm] = useState({ marketId: '', zone: '', prefix: '', startNumber: '1', count: '10', price: '', size: 'S', productType: 'divers' });
+  // Forms - Initialize with dynamic category first id if available, else 'divers'
+  const defaultCat = categories.length > 0 ? categories[0].id : 'divers';
+  const [newForm, setNewForm] = useState({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: defaultCat, occupantId: '' });
+  const [bulkForm, setBulkForm] = useState({ marketId: '', zone: '', prefix: '', startNumber: '1', count: '10', price: '', size: 'S', productType: defaultCat });
+
+  // Vendor Filtering
+  const availableVendors = users.filter(u => u.role === 'vendor' && !u.isBanned);
 
   // Fetch Logic
   const loadStalls = async () => {
@@ -75,6 +81,9 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
       const lat = 0.3920 + (Math.random() - 0.5) * 0.005;
       const lng = 9.4540 + (Math.random() - 0.5) * 0.005;
       
+      // Resolve occupant info if selected
+      const occupant = newForm.occupantId ? availableVendors.find(u => u.id === newForm.occupantId) : null;
+
       onCreateStall({
           number: newForm.number,
           zone: newForm.zone,
@@ -82,15 +91,17 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
           size: newForm.size as any,
           marketId: newForm.marketId,
           productType: newForm.productType as any,
-          status: 'free',
+          status: occupant ? 'occupied' : 'free',
+          occupantId: occupant ? occupant.id : undefined,
+          occupantName: occupant ? occupant.name : undefined,
+          occupantPhone: occupant ? occupant.phone : undefined,
           complianceScore: 100,
           healthStatus: 'healthy',
           documents: [], employees: [], activityLog: [], messages: [], surfaceArea: 4,
           coordinates: { lat, lng }
       });
       setIsCreateOpen(false);
-      setNewForm({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: 'divers' });
-      // Reload happens via optimistic update in hook or manual refresh
+      setNewForm({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: defaultCat, occupantId: '' });
       setTimeout(loadStalls, 1000);
   };
 
@@ -211,6 +222,7 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
                                 <th className="p-4">Numéro</th>
                                 <th className="p-4">Marché</th>
                                 <th className="p-4">Zone</th>
+                                <th className="p-4">Type</th>
                                 <th className="p-4">Prix</th>
                                 <th className="p-4">Occupant</th>
                                 <th className="p-4 text-right">Actions</th>
@@ -222,6 +234,7 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
                                     <td className="p-4 font-bold text-gray-900">{stall.number}</td>
                                     <td className="p-4 text-sm text-gray-600">{getMarketName(stall.marketId)}</td>
                                     <td className="p-4">{stall.zone}</td>
+                                    <td className="p-4"><Badge>{categories.find(c => c.id === stall.productType)?.label || stall.productType}</Badge></td>
                                     <td className="p-4 font-medium">{stall.price.toLocaleString()} F</td>
                                     <td className="p-4 text-gray-600">{stall.occupantName || '-'}</td>
                                     <td className="p-4 text-right flex justify-end gap-2">
@@ -264,7 +277,7 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
         {/* Modal Création Unitaire */}
         {isCreateOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl w-full max-w-md p-8 shadow-2xl">
+                <div className="bg-white rounded-2xl w-full max-w-md p-8 shadow-2xl overflow-y-auto max-h-[90vh]">
                     <h3 className="text-xl font-bold mb-6 text-gray-900">Ajouter un Étal</h3>
                     <form onSubmit={handleCreate} className="space-y-5">
                         <Select label="Marché" required value={newForm.marketId} onChange={e => setNewForm({...newForm, marketId: e.target.value})}>
@@ -281,6 +294,26 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
                                 <option value="S">Petit (S)</option><option value="M">Moyen (M)</option><option value="L">Grand (L)</option>
                             </Select>
                         </div>
+                        
+                        <Select label="Type d'Activité (Défaut)" value={newForm.productType} onChange={e => setNewForm({...newForm, productType: e.target.value})}>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </Select>
+
+                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                                <UserPlus className="w-4 h-4"/> Attribution Directe (Optionnel)
+                            </label>
+                            <Select value={newForm.occupantId} onChange={e => setNewForm({...newForm, occupantId: e.target.value})} className="bg-white">
+                                <option value="">Laisser Libre</option>
+                                {availableVendors.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name} (Vendeur)</option>
+                                ))}
+                            </Select>
+                            <p className="text-[10px] text-gray-400 mt-1 italic">
+                                L'étal passera directement en statut "Occupé".
+                            </p>
+                        </div>
+
                         <div className="flex gap-3 pt-2">
                             <Button type="button" variant="ghost" onClick={() => setIsCreateOpen(false)} className="flex-1">Annuler</Button>
                             <Button type="submit" className="flex-1 bg-orange-600 hover:bg-orange-700">Créer</Button>
@@ -308,7 +341,12 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, onCreateStall, onB
                             <Input label="Début N°" required type="number" placeholder="1" value={bulkForm.startNumber} onChange={e => setBulkForm({...bulkForm, startNumber: e.target.value})} />
                             <Input label="Quantité" required type="number" placeholder="50" value={bulkForm.count} onChange={e => setBulkForm({...bulkForm, count: e.target.value})} />
                         </div>
-                        <Input label="Loyer Unitaire (FCFA)" required type="number" placeholder="10000" value={bulkForm.price} onChange={e => setBulkForm({...bulkForm, price: e.target.value})} />
+                        <div className="grid grid-cols-2 gap-4">
+                            <Input label="Loyer Unitaire" required type="number" placeholder="10000" value={bulkForm.price} onChange={e => setBulkForm({...bulkForm, price: e.target.value})} />
+                            <Select label="Type Activité" value={bulkForm.productType} onChange={e => setBulkForm({...bulkForm, productType: e.target.value})}>
+                                {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                            </Select>
+                        </div>
                         
                         <div className="bg-orange-50 p-4 rounded-xl text-xs text-orange-800 border border-orange-100">
                             Cela va générer {bulkForm.count} étals (ex: {bulkForm.prefix}{bulkForm.startNumber} à {bulkForm.prefix}{parseInt(bulkForm.startNumber) + parseInt(bulkForm.count) - 1}).

@@ -1,6 +1,6 @@
 
 import React, { Suspense } from 'react';
-import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, AppNotification, Mission, Agent, Receipt, PaymentPlan } from '../types';
+import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, AppNotification, Mission, Agent, Receipt, PaymentPlan, ProductCategory } from '../types';
 import * as SupabaseService from '../services/supabaseService';
 
 // Lazy Components
@@ -27,7 +27,8 @@ interface RoleBasedRouterProps {
         orders: ClientOrder[];
         missions: Mission[];
         products: Product[];
-        financialStats: any; 
+        financialStats: any;
+        productCategories: ProductCategory[]; // NEW
     };
     loadingStates: any;
     lazyLoaders: any;
@@ -51,6 +52,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 missions={data.missions}
                 
                 financialStats={data.financialStats} 
+                productCategories={data.productCategories} // Pass categories
 
                 loadingStates={loadingStates}
                 onLoadFinance={lazyLoaders.loadFinance}
@@ -59,7 +61,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 currentLanguage={currentLanguage}
 
                 onSendSms={() => {}} 
-                onApprovePlan={actions.approvePaymentPlan} // Connected
+                onApprovePlan={actions.approvePaymentPlan} 
                 onAddMarket={actions.createMarket} 
                 onUpdateMarket={actions.updateMarket} 
                 onDeleteMarket={actions.deleteMarket} 
@@ -71,6 +73,10 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 onUpdateUserStatus={actions.updateUserStatus}
                 onAssignMission={actions.assignMission}
                 onValidateCashDrop={actions.validateCashDrop}
+                
+                // Settings Actions
+                onAddCategory={actions.createCategory}
+                onDeleteCategory={actions.deleteCategory}
             />
         );
     }
@@ -78,7 +84,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
     if (currentUser.role === 'vendor') {
         const currentVendorProfile = {
             ...currentUser,
-            hygieneScore: 4.5, // Mock if missing
+            hygieneScore: 4.5, 
             subscriptionPlan: 'standard' as const
         };
 
@@ -89,12 +95,13 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 receipts={data.receipts} 
                 myStall={data.stalls.find(s => s.occupantId === currentUser.id)} 
                 stalls={data.stalls} 
-                markets={data.markets} // Passed markets for reservation context
+                markets={data.markets} 
                 myReports={data.reports} 
                 sanctions={data.sanctions} 
                 products={data.products} 
                 orders={data.orders} 
-                notifications={data.notifications} 
+                notifications={data.notifications}
+                productCategories={data.productCategories} // Pass categories
                 
                 onAddProduct={actions.createProduct} 
                 onUpdateProduct={actions.updateProduct} 
@@ -104,7 +111,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 onToggleLogistics={() => Promise.resolve()} 
                 onReserve={(id, p, prio) => SupabaseService.reserveStall(id, currentUser.id).then(() => actions.updateMarket(id, {}))} 
                 onContestSanction={(id, r) => SupabaseService.contestSanction(id, r)}
-                onRequestPlan={actions.requestPaymentPlan} // Connected
+                onRequestPlan={actions.requestPaymentPlan} 
             />
         );
     }

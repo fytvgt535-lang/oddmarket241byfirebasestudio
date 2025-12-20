@@ -1,8 +1,16 @@
 
 export type StallStatus = 'free' | 'occupied' | 'reserved';
-export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers';
+// ProductType is now a string to allow dynamic values, but we keep union for TS checking of defaults if needed
+export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers' | string;
 export type Language = 'fr' | 'en' | 'fang' | 'mpongwe';
 export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
+
+export interface ProductCategory {
+  id: string;
+  label: string;
+  color: string; // Tailwind color class or hex
+  icon?: string; // Icon name reference
+}
 
 // --- SCHEDULE SYSTEM ---
 export interface DaySchedule {
@@ -472,12 +480,16 @@ export interface VendorDashboardProps {
   receipts: Receipt[];
   myStall?: Stall;
   stalls?: Stall[];
+  markets?: Market[]; // Added to fix ReferenceError
   myReports: HygieneReport[];
   sanctions: Sanction[];
   paymentPlan?: PaymentPlan;
   products: Product[];
   orders: ClientOrder[];
   notifications: AppNotification[];
+  // NEW: Dynamic Categories
+  productCategories?: ProductCategory[];
+  
   onAddProduct: (product: Omit<Product, 'id'>) => Promise<any>;
   onUpdateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   onDeleteProduct: (id: string) => void;
@@ -486,4 +498,5 @@ export interface VendorDashboardProps {
   onUpdateProfile?: (updates: Partial<VendorProfile>) => void;
   onToggleLogistics?: (subscribed: boolean) => Promise<any>;
   onReserve?: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void;
+  onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
 }

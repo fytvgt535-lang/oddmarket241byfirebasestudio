@@ -1,13 +1,14 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard, Radio, Zap, Server, AlertTriangle, TrendingUp, Map, CheckCircle } from 'lucide-react';
-import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder, Mission } from '../types';
+import { Activity, Building2, Bell, Users, LayoutGrid, DollarSign, Settings, X, ShoppingBag, Shield, Loader2, Globe, CreditCard, Radio, Zap, Server, AlertTriangle, TrendingUp, Map, CheckCircle, Sliders } from 'lucide-react';
+import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder, Mission, ProductCategory } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
 import FinanceManager from './admin/FinanceManager';
 import UserManager from './admin/UserManager';
 import AuditLogViewer from './admin/AuditLogViewer';
 import AgentManager from './admin/AgentManager';
+import SettingsManager from './admin/SettingsManager'; // NEW COMPONENT
 import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { t } from '../services/translations';
 import { simulateGlobalLocation, formatCurrency } from '../utils/coreUtils';
@@ -36,6 +37,9 @@ interface AdminDashboardProps {
       collectionRate: number;
   };
 
+  // Dynamic Data
+  productCategories?: ProductCategory[];
+
   loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean; missions?: boolean };
   onLoadFinance?: () => void;
   onLoadUsers?: () => void;
@@ -58,19 +62,24 @@ interface AdminDashboardProps {
   onAssignMission?: (mission: any) => void;
   onValidateCashDrop?: (agentId: string, amount: number) => void;
   
+  // Settings Actions
+  onAddCategory?: (cat: Omit<ProductCategory, 'id'>) => void;
+  onDeleteCategory?: (id: string) => void;
+
   // New: Current Language
   currentLanguage: string;
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
     markets = [], stalls = [], reports = [], transactions = [], expenses = [], notifications = [], users = [], orders = [], sanctions = [], agents = [], missions = [], paymentPlans = [],
-    financialStats, // Injected Stats
+    financialStats, productCategories = [],
     loadingStates, onLoadFinance, onLoadUsers, onLoadMissions,
     onAddMarket, onUpdateMarket, onDeleteMarket, onUpdateUserStatus, onCreateStall, onDeleteStall, onAddExpense, onDeleteExpense, onBulkCreateStalls, onApprovePlan,
     onAssignMission, onValidateCashDrop,
+    onAddCategory, onDeleteCategory,
     currentLanguage
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'markets' | 'users' | 'agents' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'markets' | 'users' | 'agents' | 'audit' | 'settings'>('overview');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('all');
   const [showNotifications, setShowNotifications] = useState(false);
   const [marketViewMode, setMarketViewMode] = useState<'grid' | 'list'>('grid');
@@ -78,7 +87,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
       // Trigger lazy loads based on tab
       if (activeTab === 'finance' || activeTab === 'overview') onLoadFinance && onLoadFinance();
-      if (activeTab === 'users' || activeTab === 'audit' || activeTab === 'agents') onLoadUsers && onLoadUsers();
+      if (activeTab === 'users' || activeTab === 'audit' || activeTab === 'agents' || activeTab === 'space') onLoadUsers && onLoadUsers();
       if (activeTab === 'agents') onLoadMissions && onLoadMissions();
   }, [activeTab]); 
 
@@ -170,6 +179,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
           <button onClick={() => setActiveTab('markets')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'markets' ? 'border-slate-800 text-slate-900' : 'border-transparent text-gray-500'}`}><Settings className="w-4 h-4" /> {t(currentLanguage, 'tab_markets')}</button>
           <button onClick={() => setActiveTab('audit')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'audit' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}><Shield className="w-4 h-4" /> {t(currentLanguage, 'tab_audit')}</button>
+          <button onClick={() => setActiveTab('settings')} className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'settings' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500'}`}><Sliders className="w-4 h-4" /> Paramètres</button>
         </nav>
       </div>
 
@@ -185,7 +195,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="flex items-center gap-4">
                     <span>Build: v2.4.2 (Smart Sync)</span>
-                    <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {loadingStates?.users ? '...' : users.length}</span>
+                    <span className="flex items-center gap-2 text-white font-bold"><Users className="w-3 h-3"/> {t(currentLanguage, 'active_users')}: {loadingStates?.users ? '...' : users?.length || 0}</span>
                 </div>
             </div>
 
@@ -340,6 +350,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'agents' && (
           <AgentManager 
             agents={agents}
+            users={users || []} // PASSING USERS FOR ROSTER
             markets={markets}
             stalls={stalls}
             missions={missions}
@@ -369,6 +380,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <StallManager 
             stalls={stalls} 
             markets={markets} 
+            categories={productCategories}
+            users={users || []} // Pass users specifically for assignment
             onCreateStall={onCreateStall!} 
             onBulkCreateStalls={onBulkCreateStalls!} 
             onDeleteStall={onDeleteStall!}
@@ -405,6 +418,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {activeTab === 'audit' && (
           <AuditLogViewer users={users} loading={loadingStates?.users} currentLanguage={currentLanguage} />
+      )}
+
+      {activeTab === 'settings' && (
+          <SettingsManager 
+            categories={productCategories}
+            onAddCategory={onAddCategory!}
+            onDeleteCategory={onDeleteCategory!}
+          />
       )}
     </div>
   );
