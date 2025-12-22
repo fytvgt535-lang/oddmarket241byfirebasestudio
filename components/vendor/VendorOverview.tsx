@@ -1,251 +1,181 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Receipt as ReceiptIcon, Sparkles, MapPin, Search, X, CheckCircle, AlertTriangle, FileText, CalendarClock, TrendingDown } from 'lucide-react';
-import { VendorProfile, Stall, Transaction, Sanction, Market, PaymentPlan } from '../../types';
-import { generateVendorCoachTip } from '../../services/geminiService';
+import React, { useState } from 'react';
+import { X, ShieldCheck, Scan, ShieldAlert, Radio, Landmark, UserCheck, AlertTriangle, History, ArrowRight, XCircle } from 'lucide-react';
+import { VendorProfile, Stall, Sanction, User, Transaction } from '../../types';
 import { calculateStallDebt, formatCurrency } from '../../utils/coreUtils';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
 import toast from 'react-hot-toast';
+import AgentScanner from '../agent/AgentScanner';
+import { verifyAgentBadge, reportFraudAttempt } from '../../services/supabaseService';
 
 interface VendorOverviewProps {
     profile: VendorProfile;
     myStall?: Stall;
-    totalDebt: number;
-    transactions: Transaction[];
     sanctions: Sanction[];
-    onShowMap: () => void;
-    onSpeak: () => void;
-    onContestSanction?: (id: string, reason: string) => void;
-    onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
+    transactions?: Transaction[];
 }
 
-const VendorOverview: React.FC<VendorOverviewProps> = ({ profile, myStall, totalDebt, transactions, sanctions, onShowMap, onSpeak, onContestSanction, onRequestPlan }) => {
-    const [aiTip, setAiTip] = useState<string | null>(null);
-    const [showReceipts, setShowReceipts] = useState(false);
-    const [showDebtManager, setShowDebtManager] = useState(false);
-    const [planDuration, setPlanDuration] = useState(3);
-    const [isSubmittingPlan, setIsSubmittingPlan] = useState(false);
+const VendorOverview: React.FC<VendorOverviewProps> = ({ profile, myStall, sanctions = [], transactions = [] }) => {
+    const [showAgentChecker, setShowAgentChecker] = useState(false);
+    const [verificationStatus, setVerificationStatus] = useState<'idle' | 'scanning' | 'valid' | 'invalid'>('idle');
+    const [scannedAgent, setScannedAgent] = useState<User | null>(null);
 
-    useEffect(() => {
-        generateVendorCoachTip(profile, myStall).then(setAiTip);
-    }, [profile, myStall]);
-
-    const debtDetails = useMemo(() => calculateStallDebt(myStall, sanctions), [myStall, sanctions]);
-
-    const handleCreatePlan = async () => {
-        if (!onRequestPlan || !myStall) {
-            toast.error("Fonctionnalité non disponible ou étal non assigné.");
-            return;
-        }
-        
-        setIsSubmittingPlan(true);
+    const handleVerifyAgent = async (payload: string) => {
+        setVerificationStatus('scanning');
         try {
-            await onRequestPlan({
-                vendorId: profile.id,
-                stallNumber: myStall.number,
-                totalDebt: debtDetails.totalDebt,
-                installments: planDuration,
-                amountPerMonth: Math.ceil(debtDetails.totalDebt / planDuration),
-                startDate: Date.now()
-            });
-            toast.success("Demande d'échéancier envoyée à l'administration.", { duration: 5000, icon: '📅' });
-            setShowDebtManager(false);
-        } catch (e: any) {
-            toast.error("Erreur lors de la création du plan.");
-        } finally {
-            setIsSubmittingPlan(false);
+            const result = await verifyAgentBadge(payload);
+            if (result.isValid && result.agent) {
+                setScannedAgent(result.agent);
+                setVerificationStatus('valid');
+                toast.success("Agent Municipal Authentifié !");
+                if (navigator.vibrate) navigator.vibrate(200);
+            } else {
+                setVerificationStatus('invalid');
+                if (navigator.vibrate) navigator.vibrate([500, 100, 500]);
+            }
+        } catch (e) {
+            setVerificationStatus('invalid');
         }
     };
 
+    const handleReportFraud = async () => {
+        if (!myStall) return;
+        try {
+            await reportFraudAttempt(myStall.marketId, myStall.id, myStall.number);
+            toast.error("SIGNALEMENT ENVOYÉ À LA BRIGADE", { duration: 8000, icon: '🚨' });
+            setShowAgentChecker(false);
+            setVerificationStatus('idle');
+        } catch (e) {
+            toast.error("Erreur de signalement.");
+        }
+    };
+
+    const debtDetails = calculateStallDebt(myStall, sanctions);
+    const recentTx = transactions.filter(t => t.stallId === myStall?.id).slice(0, 5);
+
     return (
-        <div className="space-y-4 animate-slide-up">
-             {/* Main Card */}
-             {!myStall ? (
-                 <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
-                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
-                     <h3 className="text-xl font-bold mb-2">Pas d'étal assigné ?</h3>
-                     <p className="text-indigo-100 text-sm mb-6 opacity-90">Trouvez une place disponible dans les marchés de la ville et commencez à vendre.</p>
-                     <button onClick={onShowMap} className="w-full bg-white text-indigo-700 font-bold py-3 px-4 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
-                         <Search className="w-5 h-5"/> Explorer les marchés
-                     </button>
-                 </div>
-             ) : (
-                 <div className={`rounded-3xl p-6 border shadow-sm relative overflow-hidden ${debtDetails.totalDebt > 0 ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100'}`}>
-                     <div className="flex justify-between items-start mb-4 relative z-10">
-                         <div>
-                             <p className="text-xs font-bold text-gray-400 uppercase">Mon Emplacement</p>
-                             <h3 className="text-2xl font-black text-gray-900">{myStall.number}</h3>
-                             <p className="text-sm text-gray-500 flex items-center gap-1"><MapPin className="w-3 h-3"/> {myStall.zone}</p>
-                         </div>
-                         <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${debtDetails.totalDebt > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                             {debtDetails.totalDebt > 0 ? <AlertTriangle className="w-3 h-3"/> : <CheckCircle className="w-3 h-3"/>}
-                             {debtDetails.totalDebt > 0 ? 'Action Requise' : 'À jour'}
-                         </div>
-                     </div>
-                     
-                     {debtDetails.totalDebt > 0 ? (
-                         <div className="relative z-10">
-                             <div className="flex justify-between items-end mb-3">
-                                <span className="text-red-800 font-bold text-sm">Dette Totale</span>
-                                <span className="text-3xl font-black text-red-600">{formatCurrency(debtDetails.totalDebt)}</span>
-                             </div>
-                             <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setShowDebtManager(true)} className="text-xs bg-white border border-red-200 text-red-700 px-3 py-3 rounded-xl font-bold hover:bg-red-50 flex items-center justify-center gap-2">
-                                    <FileText className="w-4 h-4"/> Détails & Plan
-                                </button>
-                                <button className="text-xs bg-red-600 text-white px-3 py-3 rounded-xl font-bold shadow-lg shadow-red-200 hover:bg-red-700 flex items-center justify-center gap-2">
-                                    <ReceiptIcon className="w-4 h-4"/> Payer Tout
-                                </button>
-                             </div>
-                         </div>
-                     ) : (
-                         <div className="bg-green-50 p-3 rounded-xl flex items-center gap-3 relative z-10">
-                             <div className="bg-green-100 p-2 rounded-full text-green-600"><CheckCircle className="w-5 h-5"/></div>
-                             <div>
-                                 <p className="font-bold text-green-800 text-sm">Situation Saine</p>
-                                 <p className="text-xs text-green-700">Aucun impayé à ce jour.</p>
-                             </div>
-                         </div>
-                     )}
+        <div className="space-y-6 animate-fade-in pb-24">
+             {/* SCANNER DE CONTRÔLE AGENT */}
+             {showAgentChecker && (
+                 <div className="fixed inset-0 z-[120] bg-slate-950 flex flex-col p-6 animate-fade-in">
+                    <div className="flex justify-between items-center mb-8 text-white">
+                        <div className="flex items-center gap-2">
+                            <Landmark className="text-blue-500 w-6 h-6"/>
+                            <h3 className="font-black uppercase tracking-tighter text-xl">Contrôle Officiel</h3>
+                        </div>
+                        <button onClick={() => { setShowAgentChecker(false); setVerificationStatus('idle'); }} className="p-3 bg-white/10 rounded-full"><X className="text-white"/></button>
+                    </div>
+
+                    {verificationStatus !== 'invalid' && verificationStatus !== 'valid' && (
+                        <div className="flex-1 flex flex-col">
+                            <AgentScanner 
+                                mode="collect" 
+                                stalls={[]} 
+                                onScanComplete={() => {}} 
+                                onCustomVerify={handleVerifyAgent} 
+                            />
+                            <div className="mt-8 p-8 bg-blue-600/10 border border-blue-500/20 rounded-[2.5rem] text-center">
+                                <p className="text-blue-200 text-xs font-black uppercase tracking-[0.2em]">Scannez le Badge de l'agent municipal</p>
+                                <p className="text-blue-400/60 text-[11px] mt-2 font-bold italic">Ne remettez aucun paiement sans avoir certifié son identité numérique.</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {verificationStatus === 'valid' && scannedAgent && (
+                        <div className="flex-1 flex flex-col items-center justify-center space-y-10 animate-scale-in">
+                            <div className="w-40 h-40 rounded-[3.5rem] bg-green-500 flex items-center justify-center shadow-[0_0_60px_rgba(34,197,94,0.5)]">
+                                <UserCheck className="w-20 h-20 text-white"/>
+                            </div>
+                            <div className="text-center">
+                                <Badge variant="success" className="mx-auto mb-4 bg-green-500 text-white border-none px-4 py-1.5 uppercase font-black text-[10px] tracking-widest">Agent Certifié</Badge>
+                                <h4 className="text-5xl font-black text-white tracking-tighter mb-2">{scannedAgent.name}</h4>
+                                <p className="text-slate-500 font-mono text-xl tracking-widest">#{scannedAgent.id.slice(-8).toUpperCase()}</p>
+                            </div>
+                            <Button className="w-full bg-white text-black h-20 rounded-3xl font-black uppercase text-lg shadow-2xl" onClick={() => setShowAgentChecker(false)}>PROCÉDER AU PAIEMENT</Button>
+                        </div>
+                    )}
+
+                    {verificationStatus === 'invalid' && (
+                        <div className="flex-1 flex flex-col items-center justify-center space-y-10 animate-shake">
+                            <div className="w-40 h-40 rounded-[3.5rem] bg-red-600 flex items-center justify-center shadow-[0_0_60px_rgba(220,38,38,0.5)]">
+                                <ShieldAlert className="w-20 h-20 text-white animate-pulse"/>
+                            </div>
+                            <div className="text-center space-y-4 px-4">
+                                <h4 className="text-4xl font-black text-white tracking-tighter uppercase leading-none">FRAUDE DÉTECTÉE</h4>
+                                <p className="text-red-400 text-sm font-bold leading-relaxed max-w-xs mx-auto italic">
+                                    "Individu non certifié. Ne remettez aucune quittance. Signalement requis immédiatement."
+                                </p>
+                            </div>
+                            <div className="w-full space-y-3">
+                                <Button 
+                                    onClick={handleReportFraud}
+                                    className="w-full bg-red-600 hover:bg-red-700 text-white h-24 rounded-[2.5rem] font-black uppercase text-xl shadow-2xl flex items-center justify-center gap-3 border-4 border-red-500"
+                                >
+                                    <Radio className="w-8 h-8 animate-ping"/> SIGNALER L'USURPATEUR
+                                </Button>
+                                <button onClick={() => setShowAgentChecker(false)} className="w-full py-4 text-slate-500 font-black text-xs uppercase underline tracking-widest opacity-60">Fermer et garder ma caisse</button>
+                            </div>
+                        </div>
+                    )}
                  </div>
              )}
 
-             {/* Receipt Vault Button */}
-             <div className="mt-2">
-                 <button onClick={() => setShowReceipts(true)} className="w-full py-3 bg-white border-2 border-gray-100 rounded-xl text-gray-600 font-bold flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors active:scale-95">
-                     <ReceiptIcon className="w-5 h-5 text-blue-500"/> Mes Reçus & Preuves
-                 </button>
+             {/* STATUT DE REDEVANCE */}
+             {myStall && (
+                 <div className={`rounded-[3rem] p-8 border-4 shadow-2xl transition-colors ${debtDetails.totalDebt > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                     <div className="flex justify-between items-start mb-10">
+                         <div>
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Loyer Étal #{myStall.number}</p>
+                             <h3 className={`text-5xl font-black tracking-tighter ${debtDetails.totalDebt > 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(debtDetails.totalDebt)}</h3>
+                         </div>
+                         {debtDetails.totalDebt > 0 && <Badge variant="danger" className="animate-pulse">À Régler</Badge>}
+                     </div>
+                     
+                     <Button 
+                        onClick={() => setShowAgentChecker(true)}
+                        className="w-full bg-slate-900 text-white h-24 rounded-[2.5rem] font-black uppercase text-sm tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-4 border-b-[10px] border-slate-700"
+                     >
+                        <Scan className="w-8 h-8 text-blue-400"/> Authentifier l'Agent
+                     </Button>
+                 </div>
+             )}
+
+             {/* HISTORIQUE RÉCENT (POUR LA SÉCURITÉ) */}
+             <div className="space-y-4">
+                 <h3 className="text-xl font-black text-slate-900 px-1 flex items-center justify-between">
+                     <div className="flex items-center gap-2"><History className="w-5 h-5 text-blue-600"/> Historique Direct</div>
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Temps Réel</span>
+                 </h3>
+                 <div className="space-y-3">
+                     {recentTx.length === 0 ? (
+                         <div className="p-8 text-center bg-white rounded-3xl border border-slate-100 text-slate-400 font-bold text-sm italic">
+                             Aucune transaction enregistrée.
+                         </div>
+                     ) : recentTx.map(tx => (
+                         <div key={tx.id} className={`p-5 rounded-[2rem] bg-white border border-slate-100 shadow-sm flex items-center justify-between transition-all ${tx.status === 'cancelled' ? 'bg-red-50 border-red-100' : ''}`}>
+                             <div className="flex items-center gap-4">
+                                 <div className={`p-3 rounded-2xl ${tx.status === 'cancelled' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                                     {tx.status === 'cancelled' ? <XCircle className="w-6 h-6"/> : <ShieldCheck className="w-6 h-6"/>}
+                                 </div>
+                                 <div>
+                                     <p className={`font-black text-lg ${tx.status === 'cancelled' ? 'text-red-700 line-through' : 'text-slate-900'}`}>{formatCurrency(tx.amount)}</p>
+                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{new Date(tx.date).toLocaleDateString()} • {tx.collectedByName || 'Agent Mobile'}</p>
+                                 </div>
+                             </div>
+                             {tx.status === 'cancelled' ? (
+                                 <Badge variant="danger" className="font-black animate-pulse">ANNULÉ</Badge>
+                             ) : (
+                                 <div className="text-green-600"><ArrowRight className="w-5 h-5"/></div>
+                             )}
+                         </div>
+                     ))}
+                 </div>
+                 {recentTx.length > 0 && (
+                     <button className="w-full py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] hover:text-blue-600 transition-colors">Consulter le grand livre complet &rarr;</button>
+                 )}
              </div>
-        
-            {aiTip && (
-                <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-4 rounded-2xl text-white shadow-lg relative overflow-hidden">
-                    <Sparkles className="absolute top-2 right-2 text-white/20 w-12 h-12"/>
-                    <p className="text-xs text-white/60 font-bold uppercase mb-1">Conseil du Jour</p>
-                    <p className="font-medium text-sm leading-relaxed pr-8">"{aiTip}"</p>
-                </div>
-            )}
-
-            {/* DEBT MANAGER MODAL */}
-            {showDebtManager && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-                        <div className="p-5 border-b border-red-100 bg-red-50 flex justify-between items-center">
-                            <div>
-                                <h3 className="font-black text-red-900 text-lg flex items-center gap-2">
-                                    <AlertTriangle className="w-5 h-5 text-red-600"/> Gestion de la Dette
-                                </h3>
-                                <p className="text-xs text-red-700 mt-1">Transparence & Solutions</p>
-                            </div>
-                            <button onClick={() => setShowDebtManager(false)} className="p-2 hover:bg-red-100 rounded-full text-red-400 transition-colors">
-                                <X className="w-5 h-5"/>
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-5">
-                            {/* Breakdown */}
-                            <h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Composition de la dette</h4>
-                            <div className="space-y-2 mb-6">
-                                {debtDetails.details.map((item: any) => (
-                                    <div key={item.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-full ${item.type === 'fine' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                {item.type === 'fine' ? <AlertTriangle className="w-4 h-4"/> : <CalendarClock className="w-4 h-4"/>}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-gray-800 text-sm">{item.label}</p>
-                                                {item.type === 'fine' && <button onClick={() => { setShowDebtManager(false); onContestSanction && onContestSanction(item.id, "Je conteste cette amende."); }} className="text-[10px] text-blue-600 underline">Contester</button>}
-                                            </div>
-                                        </div>
-                                        <span className="font-black text-gray-900">{formatCurrency(item.amount)}</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Payment Plan Simulator */}
-                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                <h4 className="font-bold text-blue-900 flex items-center gap-2 mb-2">
-                                    <TrendingDown className="w-5 h-5"/> Simuler un Échéancier
-                                </h4>
-                                <p className="text-xs text-blue-700 mb-4">Étalez votre dette sur plusieurs mois pour alléger vos charges.</p>
-                                
-                                <div className="mb-4">
-                                    <label className="text-xs font-bold text-blue-800 block mb-1">Durée : {planDuration} mois</label>
-                                    <input 
-                                        type="range" min="2" max="6" step="1" 
-                                        value={planDuration} onChange={(e) => setPlanDuration(Number(e.target.value))}
-                                        className="w-full accent-blue-600"
-                                    />
-                                    <div className="flex justify-between text-[10px] text-blue-400 mt-1">
-                                        <span>2 mois</span>
-                                        <span>6 mois</span>
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-between items-center bg-white p-3 rounded-lg border border-blue-100">
-                                    <span className="text-sm font-medium text-gray-600">Mensualité estimée</span>
-                                    <span className="text-lg font-black text-blue-600">{formatCurrency(Math.ceil(debtDetails.totalDebt / planDuration))} /mois</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="p-5 border-t border-gray-100 bg-gray-50 flex gap-3">
-                            <Button variant="outline" onClick={() => setShowDebtManager(false)} className="flex-1">Fermer</Button>
-                            <Button onClick={handleCreatePlan} isLoading={isSubmittingPlan} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">Demander ce Plan</Button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* RECEIPTS MODAL */}
-            {showReceipts && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
-                        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <ReceiptIcon className="w-5 h-5 text-blue-600"/> Historique & Preuves
-                            </h3>
-                            <button onClick={() => setShowReceipts(false)} className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors">
-                                <X className="w-5 h-5"/>
-                            </button>
-                        </div>
-                        
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                            {transactions.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-12 text-center text-gray-400">
-                                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                                        <ReceiptIcon className="w-8 h-8 opacity-20"/>
-                                    </div>
-                                    <p className="font-bold text-gray-600">Aucun reçu disponible</p>
-                                    <p className="text-xs max-w-[200px] mt-1 opacity-70">Vos paiements et preuves d'opération s'afficheront ici une fois validés par l'administration.</p>
-                                </div>
-                            ) : (
-                                transactions.map(tx => (
-                                    <div key={tx.id} className="bg-white border border-gray-100 p-3 rounded-xl shadow-sm flex items-center justify-between hover:border-blue-200 transition-colors">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-full ${tx.type === 'fine' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                                {tx.type === 'fine' ? <AlertTriangle className="w-4 h-4"/> : <CheckCircle className="w-4 h-4"/>}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-gray-800 text-sm capitalize">{tx.type === 'rent' ? 'Loyer Étal' : tx.type}</p>
-                                                <p className="text-[10px] text-gray-400">{new Date(tx.date).toLocaleDateString()} • {new Date(tx.date).toLocaleTimeString()}</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className={`font-black ${tx.type === 'fine' ? 'text-red-600' : 'text-gray-900'}`}>{formatCurrency(tx.amount)}</p>
-                                            <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 font-mono">#{tx.reference.slice(0,6)}</span>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                        
-                        <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                            <button onClick={() => setShowReceipts(false)} className="text-blue-600 font-bold text-sm hover:underline">Fermer</button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

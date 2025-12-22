@@ -12,31 +12,44 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+    <!-- RESILIENCE CHECK -->
+    <script>
+      window.onload = function() {
+        if (typeof L === 'undefined') {
+          console.error("Leaflet non chargé. Mode dégradé sans cartes.");
+          window.MAPS_AVAILABLE = false;
+        } else {
+          window.MAPS_AVAILABLE = true;
+        }
+      }
+    </script>
+
     <style>
       body { font-family: 'Inter', sans-serif; }
-      /* Custom scrollbar for better aesthetics */
       ::-webkit-scrollbar { width: 8px; }
       ::-webkit-scrollbar-track { background: #f1f1f1; }
-      ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: #555; }
-      /* Custom fade-in animation */
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       @keyframes fadeIn {
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
       }
       .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-      /* Custom slide-up animation */
+      @keyframes scaleIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .animate-scale-in { animation: scaleIn 0.2s ease-out; }
       @keyframes slideUp {
         from { transform: translateY(100%); }
         to { transform: translateY(0); }
       }
       .animate-slide-up { animation: slideUp 0.3s ease-out; }
-      /* Text shadow for readability on images */
-      .text-shadow { text-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
-      
-      /* Leaflet Custom Overrides */
-      .leaflet-popup-content-wrapper { border-radius: 12px; font-family: 'Inter', sans-serif; }
-      .leaflet-container { background: #0f172a; } /* Dark theme map background */
+      .text-shadow { text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+      .leaflet-popup-content-wrapper { border-radius: 20px; font-family: 'Inter', sans-serif; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+      .leaflet-container { background: #f8fafc; cursor: crosshair !important; }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
   <script type="importmap">
 {
@@ -49,17 +62,17 @@
     "react": "https://aistudiocdn.com/react@^18.2.0",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.395.0?external=react,react-dom",
     "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.43.5/+esm",
-    "@eslint/js": "https://aistudiocdn.com/@eslint/js@^9.39.1",
-    "typescript-eslint": "https://aistudiocdn.com/typescript-eslint@^8.48.0",
-    "eslint-plugin-react-refresh": "https://aistudiocdn.com/eslint-plugin-react-refresh@^0.4.24",
-    "globals": "https://aistudiocdn.com/globals@^16.5.0",
-    "eslint-plugin-react-hooks": "https://aistudiocdn.com/eslint-plugin-react-hooks@^7.0.1",
-    "eslint-plugin-import": "https://aistudiocdn.com/@eslint-plugin-import@^2.32.0",
-    "eslint-plugin-jsx-a11y": "https://aistudiocdn.com/@eslint-plugin-jsx-a11y@^6.10.2",
+    "@tensorflow/tfjs": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/+esm",
     "react-easy-crop": "https://esm.sh/react-easy-crop@5.2.0?external=react,react-dom",
-    "tslib": "https://esm.sh/tslib@2.6.2",
     "react-hot-toast": "https://esm.sh/react-hot-toast@2.4.1?external=react,react-dom",
-    "html5-qrcode": "https://esm.sh/html5-qrcode@^2.3.8"
+    "html5-qrcode": "https://esm.sh/html5-qrcode@^2.3.8",
+    "eslint-plugin-react-refresh": "https://esm.sh/eslint-plugin-react-refresh@^0.4.26",
+    "globals": "https://esm.sh/globals@^16.5.0",
+    "eslint-plugin-react-hooks": "https://esm.sh/eslint-plugin-react-hooks@^7.0.1",
+    "@eslint/js": "https://esm.sh/@eslint/js@^9.39.2",
+    "eslint-plugin-import": "https://esm.sh/eslint-plugin-import@^2.32.0",
+    "typescript-eslint": "https://esm.sh/typescript-eslint@^8.50.0",
+    "eslint-plugin-jsx-a11y": "https://esm.sh/eslint-plugin-jsx-a11y@^6.10.2"
   }
 }
 </script>

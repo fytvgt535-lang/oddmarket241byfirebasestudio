@@ -1,155 +1,210 @@
 
+import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { Stall, Market, Transaction, VendorProfile, Sanction, PredictiveInsight } from "../types";
 
-import { GoogleGenAI } from "@google/genai";
-import { Stall, HygieneReport, Market, Transaction, VendorProfile, Sanction } from "../types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-export interface MapsAnalysisResult {
-  text: string;
-  links: { title: string; uri: string }[];
+export interface StrategicAudit {
+    diagnostic: string;
+    fraudRisks: string[];
+    recommendations: string[];
 }
 
-// --- GOOGLE MAPS GROUNDING ANALYSIS ---
-export const analyzeLocationWithMaps = async (lat: number, lng: number, contextLabel: string): Promise<MapsAnalysisResult> => {
-  try {
-    const prompt = `
-      Je suis un administrateur municipal à Libreville, Gabon.
-      J'audite une coordonnée GPS : Latitude ${lat}, Longitude ${lng}.
-      Ce point est censé correspondre à : "${contextLabel}".
-      
-      Utilise Google Maps pour :
-      1. Identifier ce qui se trouve réellement à cet endroit ou à proximité immédiate.
-      2. Donner l'adresse ou le lieu-dit précis.
-      
-      Réponds de manière factuelle pour un rapport d'audit.
-    `;
+export interface FraudAnalysis {
+    patterns: string[];
+    riskScore: number;
+    anomalies: string[];
+}
 
+export interface PatrolRecommendation {
+    stallId: string;
+    priority: 'high' | 'medium' | 'low';
+    reason: string;
+}
+
+const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+/**
+ * Génère une quittance vocale pour les commerçants (Accessibilité & Inclusion)
+ */
+export const generateAudioReceipt = async (amount: number, vendorName: string): Promise<Uint8Array | null> => {
+  try {
+    const ai = getAi();
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `Confirmation de paiement. Le montant de ${amount} francs CFA a été reçu avec succès pour le compte de ${vendorName}. Marché Connect vous remercie.` }] }],
       config: {
-        tools: [{ googleMaps: {} }],
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (base64Audio) {
+      const binaryString = atob(base64Audio);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
+    }
+    return null;
+  } catch (error) {
+    console.error("TTS Error:", error);
+    return null;
+  }
+};
+
+/**
+ * Suggère un itinéraire de patrouille optimisé pour l'agent (Efficacité terrain)
+ */
+export const suggestAiPatrol = async (stalls: Stall[], transactions: Transaction[], reports: any[]): Promise<PatrolRecommendation[]> => {
+    try {
+        const ai = getAi();
+        const context = {
+            stalls: stalls.map(s => ({ id: s.id, num: s.number, debt: s.price, health: s.healthStatus })),
+            recentTransactions: transactions.slice(0, 20),
+            reports: reports.slice(0, 10)
+        };
+        const prompt = `RÔLE : Superviseur de Brigade Municipale. MISSION : Prioriser 5 étals pour inspection immédiate. DATA : ${JSON.stringify(context)}`;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            stallId: { type: Type.STRING },
+                            priority: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+                            reason: { type: Type.STRING }
+                        },
+                        required: ["stallId", "priority", "reason"]
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text || "[]");
+    } catch (e) {
+        return stalls.slice(0, 5).map(s => ({ stallId: s.id, priority: 'medium', reason: 'Rotation standard' }));
+    }
+};
+
+/**
+ * Analyse le sentiment et la crédibilité d'un recours (Aide au médiateur)
+ */
+export const analyzeAppealCredibility = async (reason: string, history: Sanction[]): Promise<{ score: number; flag: boolean; advice: string }> => {
+    try {
+        const ai = getAi();
+        const prompt = `Analyser la crédibilité de ce recours marchand : "${reason}". Historique : ${JSON.stringify(history)}`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        score: { type: Type.NUMBER, description: "Score de crédibilité 0-100" },
+                        flag: { type: Type.BOOLEAN, description: "Alerte si abus suspecté" },
+                        advice: { type: Type.STRING, description: "Conseil au médiateur" }
+                    },
+                    required: ["score", "flag", "advice"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{"score": 50, "flag": false, "advice": "Analyse indisponible."}');
+    } catch (e) {
+        return { score: 50, flag: false, advice: "Vérification manuelle requise." };
+    }
+};
+
+export const predictMarketTrends = async (market: Market, transactions: Transaction[], reports: any[]): Promise<PredictiveInsight[]> => {
+    try {
+        const ai = getAi();
+        const summary = { marketName: market.name, totalTx: transactions.length, hygieneAlerts: reports.length, avgAmount: transactions.length > 0 ? transactions.reduce((a,b) => a+b.amount, 0) / transactions.length : 0 };
+        const prompt = `RÔLE : Analyste Prédictif - Gabon. MISSION : Prédire les flux de revenus. DATA : ${JSON.stringify(summary)}`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            zoneId: { type: Type.STRING },
+                            riskLevel: { type: Type.STRING },
+                            expectedRevenue: { type: Type.NUMBER },
+                            recommendation: { type: Type.STRING },
+                            reasoning: { type: Type.STRING }
+                        },
+                        required: ["zoneId", "riskLevel", "expectedRevenue", "recommendation", "reasoning"]
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text || "[]");
+    } catch (e) {
+        return [{ zoneId: "GLOBAL", riskLevel: "medium", expectedRevenue: (market.targetRevenue || 0) * 0.9, recommendation: "Maintenance préventive réseau", reasoning: "IA hors ligne" }];
+    }
+};
+
+export const runStrategicMarketAudit = async (market: Market, stalls: Stall[], transactions: Transaction[], sanctions: Sanction[]): Promise<StrategicAudit> => {
+  try {
+    const ai = getAi();
+    const prompt = `RÔLE : Inspecteur des Finances Municipales. DATA : ${JSON.stringify(market)}`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: { 
+          responseMimeType: "application/json",
+          responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                  diagnostic: { type: Type.STRING },
+                  fraudRisks: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  recommendations: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["diagnostic", "fraudRisks", "recommendations"]
+          }
       }
     });
+    return JSON.parse(response.text || "{}");
+  } catch (error) {
+    return { diagnostic: "Service indisponible.", fraudRisks: [], recommendations: ["Vérification manuelle requise"] };
+  }
+};
 
-    // Extract Grounding Chunks (Links)
-    const links: { title: string; uri: string }[] = [];
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    
-    if (chunks) {
-      chunks.forEach((chunk: any) => {
-        if (chunk.web?.uri && chunk.web?.title) {
-          links.push({ title: chunk.web.title, uri: chunk.web.uri });
-        } else if (chunk.maps?.uri && chunk.maps?.title) {
-          links.push({ title: chunk.maps.title, uri: chunk.maps.uri });
-        }
-      });
+export const analyzeFraudPatterns = async (transactions: Transaction[]): Promise<FraudAnalysis> => {
+    try {
+        const ai = getAi();
+        const prompt = `RÔLE : Expert en détection de fraude financière. Analyser les patterns suivants : ${JSON.stringify(transactions.slice(0, 50))}`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        patterns: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        riskScore: { type: Type.NUMBER },
+                        anomalies: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ["patterns", "riskScore", "anomalies"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{"patterns":[], "riskScore":0, "anomalies":[]}');
+    } catch (error) {
+        return { patterns: ["Service indisponible"], riskScore: 0, anomalies: [] };
     }
-
-    return {
-      text: response.text || "Analyse géographique indisponible.",
-      links: links
-    };
-
-  } catch (error) {
-    console.error("Maps analysis failed:", error);
-    return { text: "Erreur lors de la connexion aux services cartographiques.", links: [] };
-  }
-};
-
-// --- ADMIN STRATEGIC ANALYSIS ---
-export const generateMarketAnalysis = async (
-  marketName: string,
-  stalls: Stall[],
-  reports: HygieneReport[],
-  transactions: Transaction[],
-  marketTarget: number
-): Promise<string> => {
-  try {
-    const occupiedCount = stalls.filter(s => s.status === 'occupied').length;
-    const theoreticalRevenue = stalls
-      .filter(s => s.status === 'occupied')
-      .reduce((acc, curr) => acc + curr.price, 0);
-    
-    const actualRevenue = transactions.reduce((acc, curr) => acc + curr.amount, 0);
-    const collectionRate = Math.round((actualRevenue / theoreticalRevenue) * 100) || 0;
-    const criticalReports = reports.filter(r => r.status === 'pending');
-    const fraudRiskCount = stalls.filter(s => s.status === 'occupied' && (!s.lastPaymentDate || Date.now() - s.lastPaymentDate > 30 * 24 * 60 * 60 * 1000)).length;
-
-    const prompt = `
-      Agis comme un Auditeur Financier et Urbain senior pour la mairie de Libreville.
-      Tu analyses les données du périmètre : "${marketName}".
-
-      DONNÉES CLÉS:
-      - Taux de Recouvrement: ${collectionRate}%
-      - Risque Fraude: ${fraudRiskCount} étals.
-      - Hygiène: ${criticalReports.length} problèmes critiques.
-
-      TÂCHE:
-      Produis un rapport flash (max 100 mots) :
-      1. 💰 **Diagnostic Financier**: Analyse l'écart.
-      2. 🚨 **Action Prioritaire**: Une action concrète pour le Maire.
-      Ton ton doit être professionnel, direct et orienté solution.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
-    });
-
-    return response.text || "Analyse indisponible.";
-  } catch (error) {
-    console.error("Gemini analysis failed:", error);
-    return "Erreur IA.";
-  }
-};
-
-// --- VENDOR COACHING ---
-export const generateVendorCoachTip = async (
-  profile: VendorProfile,
-  stall: Stall | undefined
-): Promise<string> => {
-  try {
-    const prompt = `
-      Tu es un coach commercial bienveillant pour un vendeur de marché au Gabon.
-      Données Vendeur: ${profile.name}, Score Hygiène: ${profile.hygieneScore}/5.
-      Données Étal: ${stall ? `Zone: ${stall.zone}, Loyer: ${stall.price}` : 'Pas d\'étal'}.
-      
-      Donne un conseil court (1 phrase) et motivant pour l'aider à améliorer ses affaires ou son score d'hygiène.
-      Parle simplement.
-    `;
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
-    });
-    return response.text || "Gardez votre étal propre pour attirer plus de clients !";
-  } catch (e) { return "Gardez le sourire, les clients aiment ça !"; }
-};
-
-// --- AGENT NEGOTIATION SCRIPT ---
-export const generateAgentScript = async (
-  stall: Stall,
-  totalDebt: number,
-  unpaidMonths: number,
-  fines: Sanction[]
-): Promise<string> => {
-  try {
-    const prompt = `
-      Tu es un assistant pour un agent de collecte au marché. Tu dois aider l'agent à récupérer une dette.
-      
-      CONTEXTE:
-      - Vendeur: ${stall.occupantName}
-      - Dette Totale: ${totalDebt} FCFA
-      - Détails: ${unpaidMonths} mois de loyer impayés + ${fines.length} amendes.
-      - Ton: Ferme mais respectueux (Culture gabonaise).
-      
-      Génère un script de dialogue court (2 phrases) que l'agent peut dire au vendeur pour le convaincre de payer maintenant, en expliquant les preuves.
-    `;
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{text: prompt}] }, // Gemini API expects 'contents' to be an object with 'parts'
-    });
-    return response.text || "Bonjour, nous avons plusieurs impayés enregistrés. Regardons cela ensemble pour éviter des pénalités.";
-  } catch (e) { return "Bonjour, veuillez régulariser votre situation svp."; }
 };

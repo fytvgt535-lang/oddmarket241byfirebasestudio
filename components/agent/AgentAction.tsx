@@ -1,242 +1,164 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { Stall, Sanction, Mission } from '../../types';
-import { INFRACTIONS_CATALOG } from '../../constants/appConstants';
-import { calculateStallDebt, formatCurrency, generateSecureQrPayload } from '../../utils/coreUtils';
+import React, { useState, useRef, useEffect } from 'react';
+import { Stall, Sanction, Transaction, User } from '../../types';
 import { Button } from '../ui/Button';
-import { Input, Select } from '../ui/Input';
-import { Card } from '../ui/Card';
-import { Target, Volume2, Eye, Check, AlertOctagon, Printer, QrCode, Loader2, CheckCircle as CheckIcon, AlertTriangle, List } from 'lucide-react';
+import { Badge } from '../ui/Badge';
+import { QrCode, Sun, Moon, ChevronLeft, Volume2, Smartphone, Loader2, CheckCircle2, MessageCircle, ArrowRight, RotateCcw } from 'lucide-react';
+import { generateAudioReceipt } from '../../services/geminiService';
+import { formatCurrency } from '../../utils/coreUtils';
 import toast from 'react-hot-toast';
-import { supabase } from '../../supabaseClient';
 
 interface AgentActionProps {
   stall: Stall;
   mode: 'collect' | 'sanction';
   sanctions: Sanction[];
-  activeMission?: Mission | null;
+  transactions: Transaction[]; 
   onCancel: () => void;
-  onPayment: (amount: number) => void;
-  onSanction: (infractionId: string) => void;
-  isProcessing: boolean;
+  onSuccess: (data: any) => void;
+  currentUser: User;
 }
 
-const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, sanctions, activeMission, onCancel, onPayment, onSanction, isProcessing }) => {
+const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSuccess, currentUser }) => {
+  const [step, setStep] = useState<'handshake' | 'form' | 'success'>('handshake');
   const [amount, setAmount] = useState<number>(0); 
-  const [infractionId, setInfractionId] = useState('');
-  
-  // SECURITY & PAYMENT FLOW STATE
-  const [showInvoiceQR, setShowInvoiceQR] = useState(false);
-  const [invoicePayload, setInvoicePayload] = useState<string>('');
-  const [waitingForVendor, setWaitingForVendor] = useState(false);
-  const [showDebtDetails, setShowDebtDetails] = useState(false);
+  const [isSolaris, setIsSolaris] = useState(false); // Mode haute visibilité pour extérieur (Soleil)
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [successData, setSuccessData] = useState<any>(null);
+  const [undoCountdown, setUndoCountdown] = useState<number>(0);
 
-  const financials = useMemo(() => calculateStallDebt(stall, sanctions), [stall, sanctions]);
+  const containerClass = isSolaris 
+    ? "bg-white text-black font-black" 
+    : "bg-slate-900 text-white";
 
-  // Alert Agent immediately if debt is critical
-  useEffect(() => {
-      if (mode === 'collect' && financials.monthsUnpaid >= 3) {
-          toast(`ALERTE: ${financials.monthsUnpaid} mois d'impayés !`, { icon: '🚨', style: { background: '#fee2e2', color: '#b91c1c' }, duration: 5000 });
-      }
-  }, [mode, financials.monthsUnpaid]);
-
-  // Generate SECURE QR Payload when amount is set and confirmed
-  const generateInvoice = async () => {
-      if (!amount || amount <= 0) return;
-      
-      const user = (await supabase.auth.getUser()).data.user;
-      if (!user) return;
-
-      // 1. Prepare raw payload
-      const rawData = {
-          type: 'PAYMENT_REQUEST',
-          agentId: user.id,
-          stallId: stall.id,
-          amount: amount
+  const handleValidate = () => {
+      const payload = { 
+          amount, 
+          date: Date.now(), 
+          ref: `GAB-${Date.now().toString().slice(-6)}`,
+          status: 'confirmed'
       };
-
-      // 2. Wrap in SECURE PROTOCOL (MCONNECT)
-      const secureString = await generateSecureQrPayload(rawData);
-
-      setInvoicePayload(secureString);
-      setShowInvoiceQR(true);
-      setWaitingForVendor(true);
-      speakInvoice();
+      setSuccessData(payload);
+      setStep('success');
+      setUndoCountdown(7); // Sécurité anti-erreur : 7 secondes pour annuler
+      if (navigator.vibrate) navigator.vibrate([100, 30, 100]);
   };
 
-  // Listen for Payment Confirmation from Vendor
-  useEffect(() => {
-      if (!waitingForVendor) return;
-
-      const channel = supabase.channel(`payment_watch_${stall.id}`)
-          .on('postgres_changes', { 
-              event: 'INSERT', 
-              schema: 'public', 
-              table: 'transactions',
-              filter: `stall_id=eq.${stall.id}`
-          }, (payload) => {
-              if (payload.new.amount === amount && payload.new.status === 'completed') {
-                  setWaitingForVendor(false);
-                  setShowInvoiceQR(false);
-                  toast.success("Paiement validé par le vendeur !", { duration: 5000, icon: '✅' });
-                  onPayment(amount); // Trigger success flow in parent
-              }
-          })
-          .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
-  }, [waitingForVendor, stall.id, amount]);
-
-  const speakInvoice = () => {
-      const text = `Facture de ${amount} francs générée. Veuillez scanner pour valider.`;
-      if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = 'fr-FR';
-          window.speechSynthesis.speak(utterance);
-      }
+  const shareReceiptWhatsApp = () => {
+      if (!successData) return;
+      const msg = `🧾 *RECU MARCHECONNECT GABON*\n--------------------------\nRef: #${successData.ref}\nClient: ${stall.occupantName}\nÉtal: ${stall.number}\nMarché: ${stall.marketId}\n*MONTANT: ${formatCurrency(successData.amount)}*\nDate: ${new Date(successData.date).toLocaleString()}\n--------------------------\n_Certifié par l'Agent ${currentUser.name}_`;
+      const url = `https://wa.me/${stall.occupantPhone?.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank');
   };
 
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(invoicePayload)}&color=0f172a`;
+  const playVoiceReceipt = async () => {
+    if (!successData || isSpeaking) return;
+    setIsSpeaking(true);
+    const audioBytes = await generateAudioReceipt(successData.amount, stall.occupantName || 'le commerçant');
+    if (audioBytes) {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const buffer = ctx.createBuffer(1, audioBytes.length / 2, 24000);
+      const data = buffer.getChannelData(0);
+      const int16 = new Int16Array(audioBytes.buffer);
+      for (let i = 0; i < data.length; i++) data[i] = int16[i] / 32768.0;
+      
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => setIsSpeaking(false);
+      source.start();
+    } else {
+      setIsSpeaking(false);
+      toast.error("Vocal indisponible");
+    }
+  };
+
+  if (step === 'success') {
+      return (
+          <div className={`fixed inset-0 z-[110] ${undoCountdown > 0 ? 'bg-amber-600' : 'bg-green-600'} flex flex-col p-6 animate-fade-in text-white transition-colors duration-500`}>
+              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-10">
+                  {undoCountdown > 0 ? (
+                      <div className="w-32 h-32 border-8 border-white/20 rounded-full flex items-center justify-center text-5xl font-black">{undoCountdown}</div>
+                  ) : (
+                      <CheckCircle2 className="w-32 h-32 animate-scale-in"/>
+                  )}
+                  <div className="w-full bg-white text-slate-900 rounded-[3rem] p-8 shadow-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confirmation Finale</p>
+                      <p className="text-5xl font-black tracking-tighter">{formatCurrency(successData.amount)}</p>
+                      
+                      <div className="grid grid-cols-2 gap-3 mt-6">
+                        <button 
+                          onClick={playVoiceReceipt}
+                          disabled={isSpeaking}
+                          className="py-4 bg-blue-50 text-blue-600 rounded-2xl font-black flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+                        >
+                          {isSpeaking ? <Loader2 className="animate-spin w-5 h-5"/> : <Volume2 className="w-5 h-5"/>}
+                          <span className="text-[10px] uppercase">Vocal</span>
+                        </button>
+                        <button 
+                          onClick={shareReceiptWhatsApp}
+                          className="py-4 bg-green-50 text-green-600 rounded-2xl font-black flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+                        >
+                          <MessageCircle className="w-5 h-5"/>
+                          <span className="text-[10px] uppercase">WhatsApp</span>
+                        </button>
+                      </div>
+                  </div>
+              </div>
+              <div className="space-y-4 pb-8">
+                  {undoCountdown > 0 ? (
+                      <button onClick={() => setStep('form')} className="w-full h-24 bg-white text-amber-700 rounded-[2.5rem] font-black uppercase text-xl shadow-2xl flex items-center justify-center gap-3">
+                        <RotateCcw className="w-6 h-6"/> ANNULER
+                      </button>
+                  ) : (
+                      <button onClick={() => onSuccess(successData)} className="w-full h-20 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-[0.2em]">NOUVELLE OPERATION</button>
+                  )}
+              </div>
+          </div>
+      );
+  }
 
   return (
-    <div className="space-y-6">
-        
-        {/* INVOICE QR OVERLAY */}
-        {showInvoiceQR && (
-            <div className="fixed inset-0 z-[200] bg-slate-900 flex flex-col items-center justify-center p-4 animate-scale-in">
-                <div className="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm text-center relative">
-                    <button onClick={() => setShowInvoiceQR(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200">
-                        <XIcon className="w-5 h-5 text-gray-600"/>
-                    </button>
-
-                    <h3 className="text-xl font-black text-slate-900 mb-1">Facture à Scanner</h3>
-                    <p className="text-sm text-gray-500 mb-6">Présentez ce code au vendeur</p>
-                    
-                    <div className="bg-white border-4 border-slate-900 p-2 rounded-xl inline-block mb-6 relative">
-                        <img src={qrUrl} alt="Facture QR" className="w-64 h-64 mix-blend-multiply"/>
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            {waitingForVendor && <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full text-xs font-bold text-blue-600 border border-blue-200 flex items-center gap-2 animate-pulse"><Loader2 className="w-3 h-3 animate-spin"/> En attente du vendeur...</div>}
-                        </div>
-                    </div>
-
-                    <div className="text-4xl font-black text-slate-900 mb-2">{formatCurrency(amount)}</div>
-                    <p className="text-xs text-slate-400 font-mono flex items-center justify-center gap-1">
-                        <CheckIcon className="w-3 h-3 text-green-500"/> Signature Numérique Active
-                    </p>
-                </div>
-                <p className="text-white mt-8 text-sm opacity-70">Protocole MCONNECT v1.0 • Expire dans 5min</p>
+    <div className={`fixed inset-0 z-[100] flex flex-col p-6 ${containerClass} animate-fade-in overflow-y-auto`}>
+        <div className="flex justify-between items-center mb-6 shrink-0">
+            <button onClick={onCancel} className={`p-4 rounded-2xl ${isSolaris ? 'bg-black text-white' : 'bg-slate-100 text-black'}`}><ChevronLeft/></button>
+            <div className="text-center">
+                <h3 className="font-black text-2xl tracking-tighter uppercase">{mode === 'collect' ? 'Encaissement' : 'Sanction'}</h3>
+                <p className="text-[10px] font-black uppercase opacity-60">Étal {stall.number} • {stall.occupantName}</p>
             </div>
-        )}
+            <button onClick={() => setIsSolaris(!isSolaris)} className={`p-4 rounded-2xl border-4 ${isSolaris ? 'border-black' : 'border-white/10'}`}>
+                {isSolaris ? <Moon/> : <Sun/>}
+            </button>
+        </div>
 
-        {mode === 'collect' && (
-            <Card className="animate-fade-in shadow-xl border-t-4 border-blue-600">
-                <div className={`p-6 border-b border-gray-100 ${financials.totalDebt > 0 ? 'bg-red-50' : 'bg-blue-50'}`}>
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h3 className="text-3xl font-black text-gray-900">{stall.number}</h3>
-                            <p className="text-sm font-bold opacity-70 text-gray-600">{stall.occupantName || 'Inconnu'}</p>
-                        </div>
-                        <div className="text-right">
-                            <p className={`text-xs font-bold uppercase ${financials.totalDebt > 0 ? 'text-red-600' : 'text-gray-400'}`}>Dette Totale</p>
-                            <p className={`text-xl font-black ${financials.totalDebt > 0 ? 'text-red-600' : 'text-gray-900'}`}>{formatCurrency(financials.totalDebt)}</p>
-                        </div>
-                    </div>
-                    
-                    {/* Debt Details Expander */}
-                    {financials.totalDebt > 0 && (
-                        <div className="mt-4">
-                            <button onClick={() => setShowDebtDetails(!showDebtDetails)} className="text-xs font-bold flex items-center gap-1 text-red-700 underline">
-                                <List className="w-3 h-3"/> {showDebtDetails ? 'Masquer Détails' : 'Voir Détails Impayés'}
-                            </button>
-                            
-                            {showDebtDetails && (
-                                <div className="mt-2 bg-white/50 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
-                                    {(financials as any).details.map((item: any, idx: number) => (
-                                        <div key={idx} className="flex justify-between items-center text-red-800">
-                                            <span>{item.label}</span>
-                                            <span className="font-bold">{formatCurrency(item.amount)}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-                
-                <div className="p-6 space-y-6">
-                    {/* Suggestion Chips */}
-                    <p className="text-xs font-bold text-gray-400 uppercase">Montants suggérés</p>
-                    <div className="flex gap-2 overflow-x-auto pb-2">
-                        {[stall.price, 5000, 10000, financials.totalDebt].filter(v => v > 0).map((val, idx) => (
-                            <button 
-                                key={idx} 
-                                onClick={() => setAmount(val)} 
-                                className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all shadow-sm ${amount === val ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
-                            >
-                                {formatCurrency(val)}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="relative">
-                        <Input 
-                            label="Montant à Facturer (FCFA)" 
-                            type="number" 
-                            value={amount || ''} 
-                            onChange={e => setAmount(Number(e.target.value))} 
-                            className="text-3xl font-black text-center h-20 text-blue-900 bg-blue-50 border-blue-200"
-                            placeholder="0"
-                        />
-                    </div>
-
-                    <Button 
-                        onClick={generateInvoice} 
-                        isLoading={isProcessing} 
-                        disabled={!amount || amount <= 0}
-                        className="w-full h-16 text-xl bg-slate-900 hover:bg-black text-white shadow-xl"
-                    >
-                        <QrCode className="w-6 h-6 mr-2"/> GÉNÉRER FACTURE
-                    </Button>
-
-                    <p className="text-center text-xs text-gray-400">Le reçu sera envoyé au vendeur après son scan.</p>
-
-                    <Button variant="ghost" onClick={onCancel} className="w-full text-gray-400 hover:text-gray-600">Annuler</Button>
-                </div>
-            </Card>
-        )}
-
-        {mode === 'sanction' && (
-            <div className="space-y-4">
-                <Select label="Motif de l'infraction" value={infractionId} onChange={e => setInfractionId(e.target.value)}>
-                    <option value="">Sélectionner dans le Code...</option>
-                    {/* USING IMPORTED CONSTANTS */}
-                    {INFRACTIONS_CATALOG.map(i => (
-                        <option key={i.id} value={i.id}>{i.label} - {formatCurrency(i.amount)}</option>
-                    ))}
-                </Select>
-                
-                <div className="bg-red-50 p-4 rounded-lg border border-red-100">
-                    <p className="text-xs text-red-800 font-bold mb-2">Protocole Sanction:</p>
-                    <ul className="text-xs text-red-700 list-disc pl-4 space-y-1">
-                        <li>Preuve photo obligatoire.</li>
-                        <li>Géolocalisation précise requise.</li>
-                    </ul>
-                </div>
-                
-                <Button variant="danger" onClick={() => onSanction(infractionId)} disabled={!infractionId} isLoading={isProcessing} className="w-full py-4 text-lg">
-                    Confirmer Sanction
-                </Button>
-                <Button variant="ghost" onClick={onCancel} className="w-full text-gray-400 hover:text-gray-600">Annuler</Button>
+        <div className="flex-1 space-y-6 pb-24">
+            <div className={`p-10 rounded-[3rem] ${isSolaris ? 'bg-white border-8 border-black' : 'bg-white/5 border-2 border-white/10'}`}>
+                <input 
+                    type="number" 
+                    value={amount || ''} 
+                    onChange={e => setAmount(Number(e.target.value))} 
+                    className="w-full text-7xl font-black bg-transparent border-none outline-none text-center" 
+                    placeholder="0"
+                />
+                <p className="text-center font-black uppercase tracking-widest text-[10px] mt-2 opacity-50">Saisie Francs CFA</p>
             </div>
-        )}
+
+            <div className="grid grid-cols-3 gap-4">
+                {[1000, 2000, 5000, 10000, 25000, 50000].map(amt => (
+                    <button key={amt} onClick={() => setAmount(amt)} className={`h-24 rounded-3xl font-black text-xl border-4 ${isSolaris ? 'border-black bg-white' : 'bg-slate-800 border-transparent shadow-xl'}`}>{amt/1000}k</button>
+                ))}
+            </div>
+
+            <Button 
+                className={`w-full h-32 text-4xl font-black uppercase shadow-2xl rounded-[3rem] ${isSolaris ? 'bg-black text-white' : 'bg-blue-600 text-white'}`}
+                disabled={amount <= 0}
+                onClick={handleValidate}
+            >
+                VALIDER
+            </Button>
+            <button onClick={onCancel} className="w-full py-4 font-black text-slate-400 uppercase tracking-widest text-[10px]">Abandonner la saisie</button>
+        </div>
     </div>
   );
 };
-
-function XIcon(props: any) {
-    return (
-        <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 18 18"/></svg>
-    )
-}
 
 export default AgentAction;

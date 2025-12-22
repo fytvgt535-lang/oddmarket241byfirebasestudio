@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { LogIn, Mail, Lock, AlertCircle, Loader2, Store, X, Send, Eye, EyeOff, Check } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Loader2, Store, X, Send, Eye, EyeOff, Check, Landmark, ShieldCheck } from 'lucide-react';
 import { resetPasswordForEmail } from '../../services/supabaseService';
+import StrategicOverview from '../Landing/StrategicOverview';
 
 interface LoginScreenProps {
   onLogin: (email: string, pass: string) => void;
@@ -17,6 +18,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
   // UX States
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [showStrategic, setShowStrategic] = useState(false);
   
   // Forgot Password State
   const [showForgot, setShowForgot] = useState(false);
@@ -36,7 +38,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
     e.preventDefault();
     if (isLoading) return;
 
-    // Handle Remember Me logic
     if (rememberMe) {
       localStorage.setItem('marchconnect_saved_email', email);
     } else {
@@ -57,6 +58,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
     }
   };
 
+  if (showStrategic) {
+    return <StrategicOverview onClose={() => setShowStrategic(false)} />;
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-900">
       
@@ -66,22 +71,30 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
          <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-600/20 rounded-full blur-3xl transform -translate-x-1/2 translate-y-1/2"></div>
       </div>
 
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden relative z-10">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden relative z-10 animate-fade-in">
         
+        {/* VIP Access Badge */}
+        <button 
+          onClick={() => setShowStrategic(true)}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 flex items-center justify-center gap-2 transition-colors font-black text-xs uppercase tracking-widest"
+        >
+          <ShieldCheck className="w-4 h-4" /> Note d'Orientation Stratégique
+        </button>
+
         {/* Header Branding */}
         <div className="bg-white p-8 pb-4 text-center">
           <div className="mx-auto w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center mb-4">
             <Store className="w-8 h-8 text-green-600" />
           </div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight mb-1">MarchéConnect</h1>
-          <p className="text-gray-500 text-sm">Portail Sécurisé</p>
+          <h1 className="text-2xl font-black text-gray-900 tracking-tight mb-1 uppercase">MarchéConnect</h1>
+          <p className="text-gray-400 text-xs font-bold tracking-widest uppercase">Système de Régie Souveraine</p>
         </div>
 
         {/* Form Container */}
         <div className="p-8 pt-2">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 ml-1">Email</label>
+              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 ml-1">Identifiant Email</label>
               <div className="relative group">
                 <div className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-green-600 transition-colors">
                     <Mail className="w-5 h-5" />
@@ -141,22 +154,22 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
             <button 
               type="submit" 
               disabled={isLoading}
-              className="w-full bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed uppercase tracking-widest text-sm"
             >
               {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
-              {isLoading ? 'Connexion...' : 'Se Connecter'}
+              Accéder au Système
             </button>
           </form>
 
           <div className="mt-8 space-y-4">
              <div className="text-center">
-               <p className="text-gray-400 text-xs mb-2">Pas encore de compte ?</p>
+               <p className="text-gray-400 text-[10px] font-bold uppercase tracking-tighter mb-2">Première visite sur le réseau ?</p>
                <button 
                  onClick={onGoToRegister} 
                  disabled={isLoading}
-                 className="text-green-600 font-bold hover:underline text-sm"
+                 className="text-green-600 font-black hover:underline text-xs uppercase tracking-widest"
                >
-                 Créer un Compte
+                 Créer un Compte Citoyen
                </button>
              </div>
           </div>
@@ -180,7 +193,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToRegister, isLo
              {resetStatus === 'sent' ? (
                <div className="bg-green-50 p-4 rounded-xl text-center border border-green-200">
                  <p className="text-green-700 font-bold text-sm">Email envoyé !</p>
-                 <p className="text-xs text-green-600 mt-1">Vérifiez votre boîte de réception pour changer votre mot de passe.</p>
+                 <p className="text-xs text-green-600 mt-1">Vérifiez votre boîte de réception.</p>
                  <button onClick={() => setShowForgot(false)} className="mt-4 text-xs font-bold underline text-green-800">Fermer</button>
                </div>
              ) : (

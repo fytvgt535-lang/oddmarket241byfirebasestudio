@@ -3,6 +3,7 @@
   "description": "Plateforme de gestion intelligente des marchés municipaux : attribution d'étals, paiements mobiles et suivi de l'hygiène.",
   "requestFramePermissions": [
     "camera",
+    "microphone",
     "geolocation"
   ]
 }

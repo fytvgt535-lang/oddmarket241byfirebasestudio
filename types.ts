@@ -1,502 +1,345 @@
 
 export type StallStatus = 'free' | 'occupied' | 'reserved';
-// ProductType is now a string to allow dynamic values, but we keep union for TS checking of defaults if needed
 export type ProductType = 'vivres' | 'textile' | 'electronique' | 'divers' | string;
 export type Language = 'fr' | 'en' | 'fang' | 'mpongwe';
 export type AppRole = 'vendor' | 'agent' | 'admin' | 'mediator' | 'client';
-
-export interface ProductCategory {
-  id: string;
-  label: string;
-  color: string; // Tailwind color class or hex
-  icon?: string; // Icon name reference
-}
-
-// --- SCHEDULE SYSTEM ---
-export interface DaySchedule {
-  open: string;
-  close: string;
-  isOpen: boolean;
-}
-
-export interface MarketSchedule {
-  [key: string]: DaySchedule; // lundi, mardi, etc.
-}
-
-// --- AUDIT & SECURITY (UPDATED FOR GOD'S EYE) ---
-export interface AuditLog {
-  id: string;
-  actorId: string;
-  actorName?: string;
-  targetId: string;
-  action: string;
-  // Critical for disputes: What was it before?
-  oldValue?: any;
-  newValue?: any;
-  reason?: string;
-  metadata?: {
-    ip?: string;
-    device?: string;
-    browser?: string;
-    os?: string;
-    location?: string;
-    userAgent?: string;
-    isOfflineSync?: boolean; // Traceability of delayed uploads
-  };
-  created_at?: string;
-  createdAt: number;
-}
-
-export interface UserActivity {
-  id: string;
-  userId: string;
-  actionType: 'login' | 'logout' | 'navigation' | 'action';
-  details: string;
-  createdAt: number;
-}
-
-// --- AGENT MISSIONS (REAL DATA STRUCTURE) ---
-export type MissionStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
-export type MissionType = 'collection' | 'inspection' | 'verification' | 'security';
-
-export interface Mission {
-  id: string;
-  agentId: string;
-  marketId: string;
-  type: MissionType;
-  title: string;
-  description: string;
-  targetStallId?: string;
-  status: MissionStatus;
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  createdAt: number;
-  dueDate?: number;
-  completedAt?: number;
-  report?: string;
-}
-
-// --- SMART SHOPPER (OFFLINE FEATURES) ---
-export interface LocalVendor {
-  id: string;
-  name: string;
-  type: 'bio' | 'grossiste' | 'economique' | 'standard';
-  rating: number; // 1-5
-  distance: string; // ex: "Zone A"
-}
-
-export interface ProductOffer {
-  id: string;
-  productId: string;
-  productName: string;
-  vendor: LocalVendor;
-  price: number;
-  unit: string;
-  attributes: {
-    isBio: boolean;
-    isFresh: boolean;
-    isLocal: boolean;
-    isPromo: boolean;
-  };
-  score?: number;
-}
-
-export interface SmartListItem {
-  id: string;
-  originalText: string;
-  cleanTerm: string;
-  preferences: {
-    bio: boolean;
-    cheap: boolean;
-    fresh: boolean;
-  };
-  offers: ProductOffer[];
-  selectedOfferId: string | null;
-}
-
-export interface SmartListHistory {
-  id: string;
-  name: string;
-  date: number;
-  originalText: string;
-  totalAtTheTime: number;
-  itemCount: number;
-}
-
-// --- AUTHENTICATION & USER MANAGEMENT ---
-export type KycStatus = 'pending' | 'verified' | 'rejected' | 'none';
-export type IdentityType = 'cni' | 'passport' | 'carte_sejour' | 'permis';
-
-export interface IdentityDocument {
-  type: IdentityType;
-  number: string;
-  fileUrl: string;
-  uploadedAt: number;
-}
-
-export interface UserAddress {
-  id: string;
-  label: string;
-  details: string;
-  isDefault: boolean;
-}
-
-export interface ShoppingItem {
-  id: string;
-  name: string;
-  isChecked: boolean;
-}
-
-export interface UserPreferences {
-  language: Language;
-  notifications: {
-    push: boolean;
-    sms: boolean;
-    email: boolean;
-  };
-}
+export type PaymentProvider = 'orange' | 'airtel' | 'momo' | 'cash' | 'system';
+export type IdentityType = 'cni' | 'passport' | 'carte_sejour';
 
 export interface User {
-  id: string;
-  email: string;
-  passwordHash: string;
-  role: AppRole;
-  name: string;
-  phone: string;
-  isBanned: boolean;
-  kycStatus: KycStatus;
-  kycDocument?: IdentityDocument;
-  createdAt: number;
-  lastLogin?: number;
-  lastSeenAt?: number;
-  marketId?: string;
-  stallId?: string;
-  bio?: string;
-  photoUrl?: string;
-  isLogisticsSubscribed?: boolean;
-  subscriptionExpiry?: number;
-  
-  addresses?: UserAddress[];
-  shoppingList?: ShoppingItem[];
-  loyaltyPoints?: number;
-  favorites?: string[];
-  preferences?: UserPreferences;
-  
-  // Real Agent Data Storage
-  agentStats?: {
-      cashInHand: number;
-      performanceScore: number;
-      isShiftActive: boolean;
-      lastActive: number;
-      lat?: number; // Real-time Latitude
-      lng?: number; // Real-time Longitude
-      authorizedZones?: string[]; // Geofencing
-  };
+    id: string;
+    email: string;
+    name: string;
+    role: AppRole;
+    phone?: string;
+    photoUrl?: string;
+    marketId?: string;
+    isBanned?: boolean;
+    biometric?: {
+        isFaceEnrolled?: boolean;
+        enrolledFingers?: string[];
+        useBiometricLogin?: boolean;
+        lastVerification?: number;
+    };
+    preferences?: {
+        language: Language;
+        notifications: { push: boolean; sms: boolean; email: boolean };
+    };
+    loyaltyPoints?: number;
+    favorites?: string[];
+    addresses?: UserAddress[];
+    agentStats?: {
+        isShiftActive: boolean;
+        cashInHand: number;
+        lat?: number;
+        lng?: number;
+        currentDistrict?: string;
+        battery?: number;
+        status?: string;
+    };
 }
 
-export type StallHealth = 'healthy' | 'warning' | 'critical';
-
-export interface AppNotification {
-  id: string;
-  recipientRole: 'admin' | 'vendor' | 'agent' | 'client';
-  recipientId?: string;
-  title: string;
-  message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
-  date: number;
-  read: boolean;
+export interface VendorProfile extends User {
+    bio?: string;
+    isLogisticsSubscribed?: boolean;
+    hygieneScore: number;
+    subscriptionPlan: 'free' | 'standard' | 'premium';
 }
 
 export interface Market {
-  id: string;
-  name: string;
-  city: string;
-  neighborhood: string;
-  image?: string;
-  targetRevenue: number;
-  capacity: number;
-  baseRent: number;
-  hasDeliveryService: boolean;
-  description?: string;
-  lat?: number;
-  lng?: number;
-  schedule?: MarketSchedule;
-}
-
-export interface Expense {
-  id: string;
-  marketId: string;
-  category: 'cleaning' | 'security' | 'electricity' | 'maintenance' | 'staff';
-  amount: number;
-  date: number;
-  description: string;
-}
-
-export interface SmsTemplate {
-  id: string;
-  tone: 'friendly' | 'firm' | 'urgent';
-  label: string;
-  content: string;
-}
-
-export interface SmsCampaign {
-  id: string;
-  marketId: string;
-  targetAudience: 'all' | 'unpaid_30' | 'unpaid_60' | 'zone_vivres' | 'vulnerable';
-  message: string;
-  tone: SmsTemplate['tone'];
-  sentDate: number;
-  status: 'sent' | 'scheduled';
-  recipientCount: number;
-}
-
-export interface PaymentPlan {
-  id: string;
-  vendorId: string;
-  stallNumber: string;
-  totalDebt: number;
-  installments: number;
-  amountPerMonth: number;
-  startDate: number;
-  status: 'active' | 'completed' | 'defaulted';
-  progress: number;
-  installmentsList?: { month: number; status: 'paid' | 'pending'; dueDate: number }[];
-}
-
-export interface Sanction {
-  id: string;
-  vendorId: string;
-  marketId: string;
-  stallId?: string;
-  type: 'warning' | 'fine' | 'suspension';
-  infractionId?: string;
-  reason: string;
-  amount: number;
-  date: number;
-  status: 'active' | 'resolved' | 'pending_appeal' | 'appeal_accepted' | 'appeal_rejected';
-  issuedBy: string;
-  evidenceUrl?: string;
-  appealReason?: string;
-  appealDate?: number;
-  appealStatus?: 'pending' | 'accepted' | 'rejected';
-}
-
-export interface AgentLog {
-  id: string;
-  agentId: string;
-  actionType: 'payment_collected' | 'sanction_issued' | 'shift_start' | 'shift_end' | 'cash_deposit';
-  details: string;
-  amount?: number;
-  timestamp: number;
-  hash: string;
-  location: string;
-  evidenceUrl?: string;
-}
-
-export interface Agent {
-  id: string;
-  userId?: string;
-  name: string;
-  marketId: string;
-  role: 'collector' | 'hygiene' | 'delivery';
-  performanceScore: number;
-  lastActive: number;
-  cashInHand: number;
-  isShiftActive: boolean;
-  lat?: number;
-  lng?: number;
-  authorizedZones?: string[]; // Added
-  logs: AgentLog[];
-}
-
-export interface Receipt {
-  id: string;
-  transactionId: string;
-  stallNumber: string;
-  vendorName: string;
-  amount: number;
-  date: number;
-  agentId: string;
-  hash: string;
-  gpsCoordinates: string;
-  marketId: string;
-}
-
-export interface StallDocument {
-  id: string;
-  type: 'lease_agreement' | 'insurance' | 'hygiene_cert' | 'tax_clearance';
-  status: 'valid' | 'expired' | 'missing' | 'pending';
-  expiryDate: number;
-  url?: string;
-}
-
-export interface StallEmployee {
-  id: string;
-  name: string;
-  role: 'manager' | 'seller' | 'helper';
-  phone: string;
-  isRegistered: boolean;
-}
-
-export interface StallMessage {
-  id: string;
-  direction: 'inbound' | 'outbound';
-  content: string;
-  date: number;
-  read: boolean;
-}
-
-export interface StallActivity {
-  id: string;
-  type: 'payment' | 'infraction' | 'maintenance' | 'document_update' | 'inspection' | 'message';
-  date: number;
-  description: string;
-  agentName?: string;
+    id: string;
+    name: string;
+    city: string;
+    neighborhood: string;
+    image?: string;
+    capacity: number;
+    targetRevenue: number;
+    lat: number;
+    lng: number;
+    description?: string;
+    hasDeliveryService?: boolean;
+    baseRent: number;
 }
 
 export interface Stall {
-  id: string;
-  marketId: string;
-  number: string;
-  zone: string;
-  price: number;
-  status: StallStatus;
-  occupantName?: string;
-  occupantPhone?: string;
-  occupantId?: string;
-  lastPaymentDate?: number;
-  size: 'S' | 'M' | 'L';
-  surfaceArea: number;
-  productType: ProductType;
-  isPriority?: boolean;
-  complianceScore: number;
-  healthStatus: StallHealth;
-  documents: StallDocument[];
-  employees: StallEmployee[];
-  activityLog: StallActivity[];
-  messages: StallMessage[];
-  coordinates?: { lat: number, lng: number };
-}
-
-export interface HygieneReport {
-  id: string;
-  marketId: string;
-  category: 'waste' | 'water' | 'pest' | 'infrastructure';
-  description: string;
-  timestamp: number;
-  status: 'pending' | 'resolved';
-  location: string;
-  isAnonymous: boolean;
-  hasAudio?: boolean;
-}
-
-export type PaymentProvider = 'orange' | 'momo' | 'airtel' | 'cash' | 'system';
-
-export interface Transaction {
-  id: string;
-  marketId: string;
-  amount: number;
-  date: number;
-  type: 'rent' | 'fine' | 'tax' | 'logistics_sub' | 'deposit'; // Includes 'deposit' for agent cash drops
-  provider: PaymentProvider;
-  stallNumber?: string;
-  stallId?: string;
-  reference: string;
-  status: 'pending' | 'completed';
-  collectedBy?: string;
+    id: string;
+    marketId: string;
+    number: string;
+    zone: string;
+    status: StallStatus;
+    productType: ProductType;
+    price: number;
+    size: string;
+    occupantId?: string;
+    occupantName?: string;
+    occupantPhone?: string;
+    lastPaymentDate?: number;
+    healthStatus: 'healthy' | 'critical';
+    complianceScore: number;
+    surfaceArea?: number;
 }
 
 export interface Product {
-  id: string;
-  stallId: string;
-  name: string;
-  price: number;
-  promoPrice?: number;
-  isPromo?: boolean;
-  costPrice?: number;
-  isVisible?: boolean;
-  unit: string;
-  imageUrl?: string;
-  additionalImages?: string[];
-  inStock: boolean;
-  stockQuantity: number;
-  category: ProductType;
-  description?: string;
-  origin?: string;
-  subCategory?: string;
-  tags?: string[];
-  wholesalePrices?: { minQuantity: number, price: number }[];
-  freshnessLevel?: number;
-  qualityGrade?: 'A' | 'B' | 'C';
-  audioDescriptionUrl?: string;
+    id: string;
+    stallId: string;
+    name: string;
+    price: number;
+    promoPrice?: number;
+    category: string;
+    stockQuantity: number;
+    inStock: boolean;
+    description?: string;
+    imageUrl?: string;
+    unit: string;
+    isVisible: boolean;
+    isPromo?: boolean;
+    tags?: string[];
+}
+
+export interface Transaction {
+    id: string;
+    marketId: string;
+    amount: number;
+    date: number;
+    type: 'rent' | 'fine' | 'tax' | 'deposit';
+    provider: PaymentProvider;
+    stallId?: string;
+    stallNumber?: string;
+    reference: string;
+    status: 'pending' | 'completed';
+    collectedBy?: string;
+    collectedByName?: string;
+    nonce?: number;
+}
+
+export interface Sanction {
+    id: string;
+    marketId: string;
+    stallId: string;
+    vendorId?: string;
+    type: 'fine' | 'warning' | 'closure';
+    reason: string;
+    amount: number;
+    date: number;
+    status: 'active' | 'resolved' | 'pending_appeal' | 'accepted' | 'rejected';
+    issuedBy: string;
+    evidenceUrl?: string;
+    appealReason?: string;
+    appealDate?: number;
+}
+
+export interface HygieneReport {
+    id: string;
+    marketId: string;
+    category: 'waste' | 'water' | 'pest' | 'infrastructure';
+    description: string;
+    location: string;
+    timestamp: number;
+    status: 'new' | 'investigating' | 'resolved';
+    isAnonymous: boolean;
+    hasAudio: boolean;
+}
+
+export interface Agent extends User {}
+
+export interface Expense {
+    id: string;
+    marketId: string;
+    category: 'maintenance' | 'cleaning' | 'security' | 'electricity' | 'staff';
+    amount: number;
+    description: string;
+    date: number;
+}
+
+export interface PaymentPlan {
+    id: string;
+    stallNumber: string;
+    totalDebt: number;
+    installments: number;
+    amountPerMonth: number;
+    status: 'active' | 'defaulted' | 'pending';
+    progress: number;
+}
+
+export interface Receipt {
+    id: string;
+    transactionId: string;
+    date: number;
+}
+
+export interface AppNotification {
+    id: string;
+    userId: string;
+    title: string;
+    message: string;
+    timestamp: number;
+    read: boolean;
+    type: 'info' | 'warning' | 'alert';
+}
+
+export interface Mission {
+    id: string;
+    agentId: string;
+    title: string;
+    status: 'pending' | 'active' | 'completed';
+}
+
+export interface ProductCategory {
+    id: string;
+    label: string;
+    color: string;
+}
+
+export interface AgentLog {
+    id: string;
+    agentId: string;
+    actionType: 'payment_collected' | 'sanction_issued' | 'shift_start' | 'shift_end';
+    details: string;
+    timestamp: number;
+    amount?: number;
+}
+
+export interface AuditLog {
+    id: string;
+    action: string;
+    actorId: string;
+    actorName?: string;
+    targetId: string;
+    reason?: string;
+    oldValue?: any;
+    newValue?: any;
+    createdAt: number;
+    metadata?: {
+        device?: string;
+        os?: string;
+        ip?: string;
+    };
+}
+
+export interface PredictiveInsight {
+    zoneId: string;
+    riskLevel: string;
+    expectedRevenue: number;
+    recommendation: string;
+    reasoning: string;
+}
+
+export interface ShoppingItem {
+    id: string;
+    name: string;
+    isChecked: boolean;
+}
+
+export interface UserAddress {
+    id: string;
+    label: string;
+    details: string;
+    isDefault: boolean;
+}
+
+export interface SmartListItem {
+    id: string;
+    originalText: string;
+    cleanTerm: string;
+    preferences: { bio: boolean, cheap: boolean, fresh: boolean };
+    offers: ProductOffer[];
+    selectedOfferId: string | null;
+}
+
+export interface ProductOffer {
+    id: string;
+    productId: string;
+    productName: string;
+    price: number;
+    unit: string;
+    vendor: {
+        id: string;
+        name: string;
+        type: string;
+        rating: number;
+        distance: string;
+    };
+    attributes: {
+        isBio: boolean;
+        isFresh: boolean;
+        isLocal: boolean;
+        isPromo: boolean;
+    };
+    score?: number;
+}
+
+export interface SmartListHistory {
+    id: string;
+    name: string;
+    originalText: string;
+    itemCount: number;
+    date: number;
+    totalAtTheTime: number;
+}
+
+export interface StallMessage {
+    id: string;
+    stallId: string;
+    text: string;
+    timestamp: number;
+    sender: 'admin' | 'vendor';
+}
+
+export interface FraudAlert {
+    id: string;
+    marketId: string;
+    stallId: string;
+    stallNumber: string;
+    timestamp: number;
+    description: string;
+    status: 'new' | 'investigating' | 'resolved';
+}
+
+export interface OfflineProof {
+    id: string;
+    agentId: string;
+    vendorId: string;
+    amount: number;
+    timestamp: number;
+    nonce: number;
+    signature: string;
+    synced: boolean;
 }
 
 export interface ClientOrder {
-  id: string;
-  stallId: string;
-  customerId?: string;
-  customerName: string;
-  customerPhone: string;
-  items: { productId: string; name: string; quantity: number; price: number }[];
-  totalAmount: number;
-  status: 'pending' | 'paid' | 'preparing' | 'ready' | 'picked_up' | 'in_transit' | 'delivered';
-  date: number;
-  paymentProvider: 'orange' | 'airtel' | 'momo';
-  paymentRef: string;
-  deliveryMode: 'pickup' | 'delivery';
-  deliveryAddress?: string;
-  deliveryFee?: number;
-  assignedAgentId?: string;
-}
-
-export interface SubscriptionHistory {
-  id: string;
-  date: number;
-  amount: number;
-  planName: string;
-  status: 'active' | 'expired';
-}
-
-export interface VendorProfile {
-  id: string;
-  userId?: string;
-  name: string;
-  phone: string;
-  stallId?: string;
-  photoUrl?: string;
-  bannerUrl?: string;
-  bio?: string;
-  hygieneScore: number;
-  isVulnerable?: boolean;
-  language: Language;
-  isLogisticsSubscribed: boolean;
-  subscriptionExpiry?: number;
-  subscriptionPlan?: 'standard' | 'premium';
-  subscriptionHistory?: SubscriptionHistory[];
+    id: string;
+    date: number;
+    status: 'pending' | 'ready' | 'completed' | 'cancelled';
+    stallId: string;
+    customerName: string;
+    customerPhone: string;
+    customerId?: string;
+    items: Array<{ productId: string; name: string; quantity: number; price: number }>;
+    totalAmount: number;
+    paymentProvider: PaymentProvider;
+    paymentRef: string;
+    deliveryMode: 'pickup' | 'delivery';
 }
 
 export interface VendorDashboardProps {
-  profile: VendorProfile;
-  transactions: Transaction[];
-  receipts: Receipt[];
-  myStall?: Stall;
-  stalls?: Stall[];
-  markets?: Market[]; // Added to fix ReferenceError
-  myReports: HygieneReport[];
-  sanctions: Sanction[];
-  paymentPlan?: PaymentPlan;
-  products: Product[];
-  orders: ClientOrder[];
-  notifications: AppNotification[];
-  // NEW: Dynamic Categories
-  productCategories?: ProductCategory[];
-  
-  onAddProduct: (product: Omit<Product, 'id'>) => Promise<any>;
-  onUpdateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
-  onDeleteProduct: (id: string) => void;
-  onUpdateOrderStatus: (orderId: string, status: ClientOrder['status']) => void;
-  onContestSanction?: (sanctionId: string, reason: string) => void;
-  onUpdateProfile?: (updates: Partial<VendorProfile>) => void;
-  onToggleLogistics?: (subscribed: boolean) => Promise<any>;
-  onReserve?: (stallId: string, provider: PaymentProvider, isPriority: boolean) => void;
-  onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
+    profile: VendorProfile;
+    transactions?: Transaction[];
+    receipts?: Receipt[];
+    myStall?: Stall;
+    stalls?: Stall[];
+    myReports?: HygieneReport[];
+    sanctions?: Sanction[];
+    products?: Product[];
+    orders?: ClientOrder[];
+    notifications?: AppNotification[];
+    productCategories?: ProductCategory[];
+    onAddProduct: (p: Omit<Product, 'id'>) => Promise<any>;
+    onUpdateProduct: (id: string, p: Partial<Product>) => Promise<any>;
+    onDeleteProduct: (id: string) => Promise<any>;
+    onUpdateOrderStatus: (id: string, s: string) => Promise<any>;
+    onUpdateProfile: (u: Partial<VendorProfile>) => Promise<any>;
+    onToggleLogistics?: (active: boolean) => Promise<any>;
+    onReserve?: (id: string, p: PaymentProvider, prio: boolean) => Promise<any>;
+    onContestSanction?: (id: string, r: string) => Promise<any>;
+    onRequestPlan?: (plan: Omit<PaymentPlan, 'id' | 'status' | 'progress'>) => Promise<void>;
 }

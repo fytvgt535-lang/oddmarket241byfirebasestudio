@@ -246,7 +246,9 @@ const AuditLogViewer: React.FC<AuditLogViewerProps> = ({ users = [], loading = f
                     
                     <div className="p-4 border-b border-gray-200 bg-white sticky top-0 z-10 shadow-sm flex justify-between items-center">
                         <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                            <Terminal className="w-4 h-4 text-blue-600"/>
+                            <div className="p-2 bg-slate-900 rounded-lg relative overflow-hidden">
+                                <Activity className="w-4 h-4 text-white relative z-10"/>
+                            </div>
                             Flux d'Activité
                         </h4>
                         <span className="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-600 border border-slate-200">{filteredLogs.length} events</span>

@@ -1,7 +1,8 @@
 
-import React, { Suspense } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { User, Market, Stall, Product, Transaction, Expense, ClientOrder, Sanction, AppNotification, Mission, Agent, Receipt, PaymentPlan, ProductCategory } from '../types';
 import * as SupabaseService from '../services/supabaseService';
+import BiometricEnrollment from './vendor/BiometricEnrollment';
 
 // Lazy Components
 const AdminDashboard = React.lazy(() => import('./AdminDashboard'));
@@ -28,7 +29,7 @@ interface RoleBasedRouterProps {
         missions: Mission[];
         products: Product[];
         financialStats: any;
-        productCategories: ProductCategory[]; // NEW
+        productCategories: ProductCategory[]; 
     };
     loadingStates: any;
     lazyLoaders: any;
@@ -41,6 +42,30 @@ interface RoleBasedRouterProps {
 const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({ 
     currentUser, data, loadingStates, lazyLoaders, actions, currentLanguage, onUpdateProfile, onSignOut 
 }) => {
+    const [needsBiometricEnroll, setNeedsBiometricEnroll] = useState(false);
+
+    useEffect(() => {
+        if (currentUser.role === 'vendor' && !currentUser.biometric?.isFaceEnrolled) {
+            setNeedsBiometricEnroll(true);
+        }
+    }, [currentUser]);
+
+    const handleEnrollComplete = async (bioData: any) => {
+        const updates = {
+            biometric: {
+                isFaceEnrolled: true,
+                enrolledFingers: bioData.fingers,
+                useBiometricLogin: true,
+                lastVerification: Date.now()
+            }
+        };
+        await onUpdateProfile(updates as any);
+        setNeedsBiometricEnroll(false);
+    };
+
+    if (needsBiometricEnroll && currentUser.role === 'vendor') {
+        return <BiometricEnrollment onComplete={handleEnrollComplete} />;
+    }
 
     if (currentUser.role === 'admin') {
         return (
@@ -52,7 +77,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 missions={data.missions}
                 
                 financialStats={data.financialStats} 
-                productCategories={data.productCategories} // Pass categories
+                productCategories={data.productCategories} 
 
                 loadingStates={loadingStates}
                 onLoadFinance={lazyLoaders.loadFinance}
@@ -73,8 +98,6 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 onUpdateUserStatus={actions.updateUserStatus}
                 onAssignMission={actions.assignMission}
                 onValidateCashDrop={actions.validateCashDrop}
-                
-                // Settings Actions
                 onAddCategory={actions.createCategory}
                 onDeleteCategory={actions.deleteCategory}
             />
@@ -86,7 +109,7 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
             ...currentUser,
             hygieneScore: 4.5, 
             subscriptionPlan: 'standard' as const
-        };
+        } as any;
 
         return (
             <VendorDashboard 
@@ -101,13 +124,13 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 products={data.products} 
                 orders={data.orders} 
                 notifications={data.notifications}
-                productCategories={data.productCategories} // Pass categories
+                productCategories={data.productCategories} 
                 
                 onAddProduct={actions.createProduct} 
                 onUpdateProduct={actions.updateProduct} 
                 onDeleteProduct={actions.deleteProduct} 
                 onUpdateOrderStatus={actions.updateOrderStatus} 
-                onUpdateProfile={onUpdateProfile} 
+                onUpdateProfile={onUpdateProfile as any} 
                 onToggleLogistics={() => Promise.resolve()} 
                 onReserve={(id, p, prio) => SupabaseService.reserveStall(id, currentUser.id).then(() => actions.updateMarket(id, {}))} 
                 onContestSanction={(id, r) => SupabaseService.contestSanction(id, r)}
@@ -132,13 +155,13 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
     if (currentUser.role === 'agent') {
         const currentAgent = {
             ...currentUser,
-            marketId: 'm1',
+            marketId: currentUser.marketId || 'm1',
             cashInHand: currentUser.agentStats?.cashInHand || 0,
             isShiftActive: !!currentUser.agentStats?.isShiftActive,
             logs: []
         };
         const agentMissions = data.missions.filter(m => m.agentId === currentUser.id);
-        const agentTransactions = data.recentTransactions.filter(t => t.collectedBy === currentUser.id);
+        const marketTransactions = data.recentTransactions.filter(t => t.marketId === currentAgent.marketId);
 
         return (
             <AgentFieldTool 
@@ -146,11 +169,22 @@ const RoleBasedRouter: React.FC<RoleBasedRouterProps> = ({
                 sanctions={data.sanctions} 
                 agentLogs={currentAgent.logs} 
                 missions={agentMissions}
-                transactions={agentTransactions}
+                transactions={marketTransactions}
                 cashInHand={currentAgent.cashInHand} 
                 isShiftActive={currentAgent.isShiftActive} 
-                onCollectPayment={(id, amt) => SupabaseService.createTransaction({ marketId: 'm1', amount: amt, type: 'rent', provider: 'cash', stallId: id, collectedBy: currentUser.id }).then(() => {})} 
-                onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: 'm1', stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
+                onCollectPayment={(id, amt) => {
+                    const stall = data.stalls.find(s => s.id === id);
+                    return SupabaseService.createTransaction({ 
+                        marketId: currentAgent.marketId, 
+                        amount: amt, 
+                        type: 'rent', 
+                        provider: 'cash', 
+                        stallId: id, 
+                        stallNumber: stall?.number,
+                        collectedBy: currentUser.id 
+                    });
+                }} 
+                onIssueSanction={(id, t, r, a) => SupabaseService.createSanction({ marketId: currentAgent.marketId, stallId: id, type: t, reason: r, amount: a, issuedBy: currentUser.id }).then(() => {})} 
                 onShiftAction={(action) => {
                     if (action === 'start') SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: true } });
                     else if (action === 'end') SupabaseService.updateUserProfile(currentUser.id, { agentStats: { ...currentAgent, isShiftActive: false } });

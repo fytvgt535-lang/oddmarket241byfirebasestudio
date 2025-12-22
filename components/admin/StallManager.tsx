@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2, ChevronLeft, ChevronRight, Loader2, UserPlus } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, LayoutGrid, List, MapPin, Trash2, Plus, Copy, AlertTriangle, Building2, ChevronLeft, ChevronRight, UserPlus } from 'lucide-react';
 import { Stall, Market, ProductCategory, User } from '../../types';
 import toast from 'react-hot-toast';
 import StallDigitalTwin from '../StallDigitalTwin';
@@ -8,238 +8,143 @@ import { Button } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
 import { Card, CardContent } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { fetchStalls } from '../../services/supabaseService';
 
 interface StallManagerProps {
-  stalls: Stall[]; // Legacy prop
+  stalls: Stall[];
   markets: Market[];
   categories: ProductCategory[];
-  users: User[]; // New prop for assignments
+  users: User[];
   onCreateStall: (stall: Omit<Stall, 'id'>) => void;
   onBulkCreateStalls: (stalls: Omit<Stall, 'id'>[]) => void;
   onDeleteStall: (id: string) => void;
   currentLanguage: string;
 }
 
-const StallManager: React.FC<StallManagerProps> = ({ markets, categories, users, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
-  // Server-side State
-  const [paginatedStalls, setPaginatedStalls] = useState<Stall[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
-  
-  // Filters
+const StallManager: React.FC<StallManagerProps> = ({ stalls, markets, categories, users, onCreateStall, onBulkCreateStalls, onDeleteStall }) => {
+  // Filters local state
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical' | 'occupied' | 'free'>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMarketId, setFilterMarketId] = useState<string>('all');
   const [page, setPage] = useState(1);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
-  // Modals
+  // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [selectedStallTwin, setSelectedStallTwin] = useState<Stall | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Forms - Initialize with dynamic category first id if available, else 'divers'
+  const ITEMS_PER_PAGE = 20;
+
+  // RECTIFICATION : Source de vérité unique basée sur la prop 'stalls'
+  const filteredStalls = useMemo(() => {
+      return stalls.filter(s => {
+          const matchesMarket = filterMarketId === 'all' || s.marketId === filterMarketId;
+          const matchesStatus = filterStatus === 'all' || s.status === filterStatus || s.healthStatus === filterStatus;
+          const matchesSearch = s.number.toLowerCase().includes(search.toLowerCase()) || 
+                               (s.occupantName || '').toLowerCase().includes(search.toLowerCase());
+          return matchesMarket && matchesStatus && matchesSearch;
+      });
+  }, [stalls, search, filterMarketId, filterStatus]);
+
+  const paginatedList = filteredStalls.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
   const defaultCat = categories.length > 0 ? categories[0].id : 'divers';
   const [newForm, setNewForm] = useState({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: defaultCat, occupantId: '' });
   const [bulkForm, setBulkForm] = useState({ marketId: '', zone: '', prefix: '', startNumber: '1', count: '10', price: '', size: 'S', productType: defaultCat });
-
-  // Vendor Filtering
-  const availableVendors = users.filter(u => u.role === 'vendor' && !u.isBanned);
-
-  // Fetch Logic
-  const loadStalls = async () => {
-      setLoading(true);
-      try {
-          const { data, count } = await fetchStalls({
-              page,
-              limit: 20, // Page size
-              marketId: filterMarketId,
-              status: filterStatus,
-              search: search
-          });
-          setPaginatedStalls(data);
-          setTotalCount(count);
-      } catch (e: any) {
-          toast.error("Erreur chargement: " + e.message);
-      } finally {
-          setLoading(false);
-      }
-  };
-
-  useEffect(() => {
-      // Debounce search
-      const timer = setTimeout(() => loadStalls(), 500);
-      return () => clearTimeout(timer);
-  }, [page, filterMarketId, filterStatus, search]);
 
   const getMarketName = (id: string) => markets.find(m => m.id === id)?.name || 'Marché Inconnu';
 
   const handleCreate = (e: React.FormEvent) => {
       e.preventDefault();
-      const lat = 0.3920 + (Math.random() - 0.5) * 0.005;
-      const lng = 9.4540 + (Math.random() - 0.5) * 0.005;
-      
-      // Resolve occupant info if selected
-      const occupant = newForm.occupantId ? availableVendors.find(u => u.id === newForm.occupantId) : null;
-
+      const vendor = users.find(u => u.id === newForm.occupantId);
       onCreateStall({
-          number: newForm.number,
-          zone: newForm.zone,
+          ...newForm,
           price: Number(newForm.price),
-          size: newForm.size as any,
-          marketId: newForm.marketId,
-          productType: newForm.productType as any,
-          status: occupant ? 'occupied' : 'free',
-          occupantId: occupant ? occupant.id : undefined,
-          occupantName: occupant ? occupant.name : undefined,
-          occupantPhone: occupant ? occupant.phone : undefined,
+          status: vendor ? 'occupied' : 'free',
+          occupantId: vendor?.id,
+          occupantName: vendor?.name,
+          occupantPhone: vendor?.phone,
           complianceScore: 100,
           healthStatus: 'healthy',
           documents: [], employees: [], activityLog: [], messages: [], surfaceArea: 4,
-          coordinates: { lat, lng }
-      });
+          coordinates: { lat: 0.39, lng: 9.45 }
+      } as any);
       setIsCreateOpen(false);
-      setNewForm({ number: '', zone: '', price: '', size: 'S', marketId: '', productType: defaultCat, occupantId: '' });
-      setTimeout(loadStalls, 1000);
-  };
-
-  const handleBulkCreate = (e: React.FormEvent) => {
-      e.preventDefault();
-      const stallsToCreate: any[] = [];
-      const start = parseInt(bulkForm.startNumber) || 1;
-      const count = parseInt(bulkForm.count) || 10;
-      const end = start + count;
-      
-      for (let i = start; i < end; i++) {
-          const numStr = i.toString().padStart(2, '0');
-          const lat = 0.3920 + (Math.random() - 0.5) * 0.01;
-          const lng = 9.4540 + (Math.random() - 0.5) * 0.01;
-          
-          stallsToCreate.push({
-              number: `${bulkForm.prefix}${numStr}`,
-              zone: bulkForm.zone,
-              price: Number(bulkForm.price),
-              size: bulkForm.size as any,
-              marketId: bulkForm.marketId,
-              productType: bulkForm.productType as any,
-              status: 'free',
-              complianceScore: 100,
-              healthStatus: 'healthy',
-              documents: [], employees: [], activityLog: [], messages: [], surfaceArea: 4,
-              coordinates: { lat, lng }
-          });
-      }
-      onBulkCreateStalls(stallsToCreate);
-      setIsBulkOpen(false);
-      setTimeout(loadStalls, 1000);
-  };
-
-  const handleDelete = () => {
-      if (deleteId) {
-          onDeleteStall(deleteId);
-          setDeleteId(null);
-          toast.success("Étal supprimé.");
-          setTimeout(loadStalls, 500);
-      }
+      toast.success("Étal ajouté au registre.");
   };
 
   return (
-    <Card className="animate-fade-in">
-        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-orange-50/50">
+    <Card className="animate-fade-in border-none shadow-none">
+        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-orange-50/30 sticky top-0 z-20 backdrop-blur-md">
             <div>
-                <h3 className="text-lg font-bold text-orange-900 flex items-center gap-2"><LayoutGrid className="w-5 h-5"/> Gestion du Parc Immobilier</h3>
-                <p className="text-sm text-orange-700">Total: {totalCount} étals référencés.</p>
+                <h3 className="text-xl font-black text-orange-950 flex items-center gap-2 uppercase tracking-tighter"><LayoutGrid className="w-6 h-6"/> Parc Immobilier</h3>
+                <p className="text-xs font-bold text-orange-700/60 uppercase tracking-widest">{filteredStalls.length} unités actives</p>
             </div>
             <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setIsBulkOpen(true)} leftIcon={Copy}>Générer Série</Button>
-                <Button variant="primary" onClick={() => setIsCreateOpen(true)} leftIcon={Plus} className="bg-orange-600 hover:bg-orange-700">Nouvel Étal</Button>
+                <Button variant="outline" onClick={() => setIsBulkOpen(true)} className="border-orange-200 text-orange-700">Générer Série</Button>
+                <Button onClick={() => setIsCreateOpen(true)} className="bg-orange-600 border-none shadow-orange-200">Nouvel Étal</Button>
             </div>
         </div>
 
-        <CardContent>
-            {/* Filters */}
+        <div className="p-6">
             <div className="flex flex-col md:flex-row gap-4 mb-6">
                 <div className="flex-1">
-                    <Input placeholder="Rechercher étal, occupant..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} leftIcon={Search} />
+                    <Input placeholder="N° étal, Commerçant..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} leftIcon={Search} className="bg-gray-50 border-transparent focus:bg-white" />
                 </div>
                 <div className="w-48">
-                    <Select value={filterMarketId} onChange={(e) => { setFilterMarketId(e.target.value); setPage(1); }}>
-                        <option value="all">Tous les marchés</option>
+                    <Select value={filterMarketId} onChange={(e) => { setFilterMarketId(e.target.value); setPage(1); }} className="bg-gray-50 border-transparent">
+                        <option value="all">Tous Marchés</option>
                         {markets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </Select>
                 </div>
                 <div className="w-48">
-                    <Select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value as any); setPage(1); }}>
-                        <option value="all">Tous les statuts</option>
+                    <Select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className="bg-gray-50 border-transparent">
+                        <option value="all">Tous Statuts</option>
                         <option value="occupied">Loué</option>
                         <option value="free">Libre</option>
-                        <option value="warning">Avertissement</option>
-                        <option value="critical">Critique (Rouge)</option>
+                        <option value="critical">Alertes</option>
                     </Select>
                 </div>
-                <div className="flex bg-gray-100 p-1 rounded-xl h-fit">
-                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}><LayoutGrid className="w-5 h-5"/></button>
-                    <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}><List className="w-5 h-5"/></button>
+                <div className="flex bg-gray-100 p-1 rounded-xl">
+                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}><LayoutGrid className="w-5 h-5"/></button>
+                    <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}><List className="w-5 h-5"/></button>
                 </div>
             </div>
 
-            {/* List/Grid View */}
-            {loading ? (
-                <div className="p-20 text-center"><Loader2 className="w-10 h-10 animate-spin mx-auto text-orange-500"/></div>
-            ) : viewMode === 'grid' ? (
+            {viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {paginatedStalls.map(stall => (
-                        <div key={stall.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-all group relative">
-                            <div className={`h-2 ${stall.healthStatus === 'healthy' ? 'bg-green-500' : stall.healthStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
-                            <div className="p-5">
-                                <div className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1">
-                                    <Building2 className="w-3 h-3"/> {getMarketName(stall.marketId)}
-                                </div>
-                                <div className="flex justify-between items-start mb-2">
-                                    <h4 className="text-2xl font-black text-gray-800">{stall.number}</h4>
-                                    <Badge variant={stall.status === 'occupied' ? 'success' : 'neutral'}>
-                                        {stall.status === 'occupied' ? 'Loué' : 'Libre'}
-                                    </Badge>
-                                </div>
-                                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><MapPin className="w-3 h-3"/> Zone {stall.zone}</p>
-                                <p className="text-sm font-bold text-gray-800 mb-4">{stall.price.toLocaleString()} FCFA</p>
-                                {stall.occupantName && <div className="mb-4 p-2 bg-gray-50 rounded-lg text-xs font-bold text-gray-700 truncate">{stall.occupantName}</div>}
-                                <div className="flex gap-2">
-                                    <Button size="sm" variant="ghost" className="flex-1 bg-blue-50 text-blue-600 hover:bg-blue-100" onClick={() => setSelectedStallTwin(stall)}>Détails</Button>
-                                    <button onClick={() => setDeleteId(stall.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><Trash2 className="w-4 h-4"/></button>
-                                </div>
+                    {paginatedList.map(stall => (
+                        <div key={stall.id} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all group p-5 relative overflow-hidden">
+                            <div className={`absolute top-0 left-0 w-full h-1.5 ${stall.status === 'occupied' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
+                            <div className="flex justify-between items-start mb-3">
+                                <h4 className="text-2xl font-black text-slate-900 leading-none">{stall.number}</h4>
+                                <Badge variant={stall.status === 'occupied' ? 'success' : 'info'}>{stall.status === 'occupied' ? 'Loué' : 'Libre'}</Badge>
+                            </div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{getMarketName(stall.marketId)}</p>
+                            <p className="text-sm font-black text-slate-700 mb-4">{stall.price.toLocaleString()} F / mois</p>
+                            <div className="flex gap-2">
+                                <Button size="sm" variant="ghost" className="flex-1 bg-slate-50 text-slate-600 font-bold" onClick={() => setSelectedStallTwin(stall)}>Digital Twin</Button>
+                                <button onClick={() => setDeleteId(stall.id)} className="p-2 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><Trash2 className="w-5 h-5"/></button>
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200">
-                    <table className="w-full text-sm text-left text-gray-700">
-                        <thead className="bg-gray-50 text-gray-500 font-bold border-b border-gray-200">
-                            <tr>
-                                <th className="p-4">Numéro</th>
-                                <th className="p-4">Marché</th>
-                                <th className="p-4">Zone</th>
-                                <th className="p-4">Type</th>
-                                <th className="p-4">Prix</th>
-                                <th className="p-4">Occupant</th>
-                                <th className="p-4 text-right">Actions</th>
-                            </tr>
+                <div className="overflow-hidden rounded-2xl border border-gray-100">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b">
+                            <tr><th className="p-4">N° Étal</th><th className="p-4">Marché</th><th className="p-4">Statut</th><th className="p-4">Prix</th><th className="p-4 text-right">Actions</th></tr>
                         </thead>
-                        <tbody>
-                            {paginatedStalls.map(stall => (
-                                <tr key={stall.id} className="hover:bg-gray-50 border-b last:border-0">
-                                    <td className="p-4 font-bold text-gray-900">{stall.number}</td>
-                                    <td className="p-4 text-sm text-gray-600">{getMarketName(stall.marketId)}</td>
-                                    <td className="p-4">{stall.zone}</td>
-                                    <td className="p-4"><Badge>{categories.find(c => c.id === stall.productType)?.label || stall.productType}</Badge></td>
-                                    <td className="p-4 font-medium">{stall.price.toLocaleString()} F</td>
-                                    <td className="p-4 text-gray-600">{stall.occupantName || '-'}</td>
-                                    <td className="p-4 text-right flex justify-end gap-2">
-                                        <Button size="sm" variant="ghost" onClick={() => setSelectedStallTwin(stall)}>Détails</Button>
-                                        <button onClick={() => setDeleteId(stall.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><Trash2 className="w-4 h-4"/></button>
+                        <tbody className="divide-y divide-gray-50">
+                            {paginatedList.map(stall => (
+                                <tr key={stall.id} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="p-4 font-black text-slate-900">{stall.number}</td>
+                                    <td className="p-4 text-slate-500 font-medium">{getMarketName(stall.marketId)}</td>
+                                    <td className="p-4"><Badge variant={stall.status === 'occupied' ? 'success' : 'info'}>{stall.status}</Badge></td>
+                                    <td className="p-4 font-bold text-slate-700">{stall.price.toLocaleString()} F</td>
+                                    <td className="p-4 text-right">
+                                        <button onClick={() => setSelectedStallTwin(stall)} className="text-blue-600 font-black text-xs uppercase hover:underline">Ouvrir Twin</button>
                                     </td>
                                 </tr>
                             ))}
@@ -248,131 +153,37 @@ const StallManager: React.FC<StallManagerProps> = ({ markets, categories, users,
                 </div>
             )}
 
-            {/* Pagination Controls */}
-            <div className="flex justify-between items-center mt-6">
-                <p className="text-xs text-gray-500">
-                    Page {page} sur {Math.ceil(totalCount / 20)}
-                </p>
+            <div className="mt-6 flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-widest">
+                <span>Page {page} / {Math.ceil(filteredStalls.length / ITEMS_PER_PAGE)}</span>
                 <div className="flex gap-2">
-                    <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={() => setPage(p => Math.max(1, p - 1))} 
-                        disabled={page === 1}
-                    >
-                        <ChevronLeft className="w-4 h-4 mr-1"/> Précédent
-                    </Button>
-                    <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={() => setPage(p => p + 1)} 
-                        disabled={page * 20 >= totalCount}
-                    >
-                        Suivant <ChevronRight className="w-4 h-4 ml-1"/>
-                    </Button>
+                    <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Précédent</Button>
+                    <Button size="sm" variant="outline" disabled={page * ITEMS_PER_PAGE >= filteredStalls.length} onClick={() => setPage(p => p + 1)}>Suivant</Button>
                 </div>
             </div>
-        </CardContent>
+        </div>
 
-        {/* Modal Création Unitaire */}
         {isCreateOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl w-full max-w-md p-8 shadow-2xl overflow-y-auto max-h-[90vh]">
-                    <h3 className="text-xl font-bold mb-6 text-gray-900">Ajouter un Étal</h3>
-                    <form onSubmit={handleCreate} className="space-y-5">
-                        <Select label="Marché" required value={newForm.marketId} onChange={e => setNewForm({...newForm, marketId: e.target.value})}>
-                            <option value="">Sélectionner...</option>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Card className="w-full max-w-md p-8 rounded-[2.5rem] shadow-2xl relative animate-scale-in">
+                    <h3 className="text-2xl font-black text-slate-900 mb-6 tracking-tighter uppercase">Initialisation Étal</h3>
+                    <form onSubmit={handleCreate} className="space-y-4">
+                        <Select label="Marché Destination" required value={newForm.marketId} onChange={e => setNewForm({...newForm, marketId: e.target.value})}>
+                            <option value="">Choisir un marché...</option>
                             {markets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </Select>
                         <div className="grid grid-cols-2 gap-4">
-                            <Input label="Numéro" required placeholder="A-12" value={newForm.number} onChange={e => setNewForm({...newForm, number: e.target.value})} />
-                            <Input label="Zone" required placeholder="Textile" value={newForm.zone} onChange={e => setNewForm({...newForm, zone: e.target.value})} />
+                            <Input label="Référence" required placeholder="Ex: B-40" value={newForm.number} onChange={e => setNewForm({...newForm, number: e.target.value})} />
+                            <Input label="Loyer Mensuel" required type="number" value={newForm.price} onChange={e => setNewForm({...newForm, price: e.target.value})} />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <Input label="Loyer (FCFA)" required type="number" placeholder="15000" value={newForm.price} onChange={e => setNewForm({...newForm, price: e.target.value})} />
-                            <Select label="Taille" value={newForm.size} onChange={e => setNewForm({...newForm, size: e.target.value})}>
-                                <option value="S">Petit (S)</option><option value="M">Moyen (M)</option><option value="L">Grand (L)</option>
-                            </Select>
-                        </div>
-                        
-                        <Select label="Type d'Activité (Défaut)" value={newForm.productType} onChange={e => setNewForm({...newForm, productType: e.target.value})}>
+                        <Select label="Type d'Activité" value={newForm.productType} onChange={e => setNewForm({...newForm, productType: e.target.value})}>
                             {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                         </Select>
-
-                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                                <UserPlus className="w-4 h-4"/> Attribution Directe (Optionnel)
-                            </label>
-                            <Select value={newForm.occupantId} onChange={e => setNewForm({...newForm, occupantId: e.target.value})} className="bg-white">
-                                <option value="">Laisser Libre</option>
-                                {availableVendors.map(u => (
-                                    <option key={u.id} value={u.id}>{u.name} (Vendeur)</option>
-                                ))}
-                            </Select>
-                            <p className="text-[10px] text-gray-400 mt-1 italic">
-                                L'étal passera directement en statut "Occupé".
-                            </p>
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <Button type="button" variant="ghost" onClick={() => setIsCreateOpen(false)} className="flex-1">Annuler</Button>
-                            <Button type="submit" className="flex-1 bg-orange-600 hover:bg-orange-700">Créer</Button>
+                        <div className="flex gap-3 pt-4">
+                            <Button type="button" variant="ghost" className="flex-1" onClick={() => setIsCreateOpen(false)}>Annuler</Button>
+                            <Button type="submit" className="flex-1 bg-orange-600 border-none">Confirmer</Button>
                         </div>
                     </form>
-                </div>
-            </div>
-        )}
-
-        {/* Modal Bulk */}
-        {isBulkOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl w-full max-w-lg p-8 shadow-2xl">
-                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-gray-900"><Copy className="w-6 h-6 text-orange-600"/> Génération Série</h3>
-                    <form onSubmit={handleBulkCreate} className="space-y-5">
-                        <div className="grid grid-cols-2 gap-4">
-                            <Select label="Marché" required value={bulkForm.marketId} onChange={e => setBulkForm({...bulkForm, marketId: e.target.value})}>
-                                <option value="">Choisir...</option>
-                                {markets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                            </Select>
-                            <Input label="Zone" required placeholder="Ex: Vivres" value={bulkForm.zone} onChange={e => setBulkForm({...bulkForm, zone: e.target.value})} />
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                            <Input label="Préfixe" required placeholder="A-" value={bulkForm.prefix} onChange={e => setBulkForm({...bulkForm, prefix: e.target.value})} />
-                            <Input label="Début N°" required type="number" placeholder="1" value={bulkForm.startNumber} onChange={e => setBulkForm({...bulkForm, startNumber: e.target.value})} />
-                            <Input label="Quantité" required type="number" placeholder="50" value={bulkForm.count} onChange={e => setBulkForm({...bulkForm, count: e.target.value})} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <Input label="Loyer Unitaire" required type="number" placeholder="10000" value={bulkForm.price} onChange={e => setBulkForm({...bulkForm, price: e.target.value})} />
-                            <Select label="Type Activité" value={bulkForm.productType} onChange={e => setBulkForm({...bulkForm, productType: e.target.value})}>
-                                {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                            </Select>
-                        </div>
-                        
-                        <div className="bg-orange-50 p-4 rounded-xl text-xs text-orange-800 border border-orange-100">
-                            Cela va générer {bulkForm.count} étals (ex: {bulkForm.prefix}{bulkForm.startNumber} à {bulkForm.prefix}{parseInt(bulkForm.startNumber) + parseInt(bulkForm.count) - 1}).
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <Button type="button" variant="ghost" onClick={() => setIsBulkOpen(false)} className="flex-1">Annuler</Button>
-                            <Button type="submit" className="flex-1 bg-orange-600 hover:bg-orange-700">Lancer Génération</Button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        )}
-
-        {/* Modal Suppression */}
-        {deleteId && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
-                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600"><AlertTriangle className="w-8 h-8"/></div>
-                    <h3 className="text-xl font-bold mb-2 text-gray-900">Supprimer l'étal ?</h3>
-                    <p className="text-gray-500 text-sm mb-6">Cette action est irréversible.</p>
-                    <div className="flex gap-3">
-                        <Button variant="ghost" onClick={() => setDeleteId(null)} className="flex-1">Annuler</Button>
-                        <Button variant="danger" onClick={handleDelete} className="flex-1">Confirmer</Button>
-                    </div>
-                </div>
+                </Card>
             </div>
         )}
 

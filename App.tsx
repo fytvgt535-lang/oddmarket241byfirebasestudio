@@ -118,7 +118,7 @@ const App: React.FC = () => {
                     onClick={() => setCurrentLanguage(prev => prev === 'fr' ? 'en' : 'fr')}
                     className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold uppercase transition-colors ${currentUser.role === 'client' ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white hover:bg-white/20'}`}
                   >
-                      <Globe className="w-3 h-3"/>
+                      <Globe className="w-3.5 h-3.5"/>
                       {currentLanguage === 'fr' ? 'Français' : 'English'}
                   </button>
                   <button onClick={handleSignOut} className="opacity-80 hover:opacity-100"><LogOut className={`w-5 h-5 ${currentUser.role === 'client' ? 'text-slate-600' : 'text-white'}`}/></button>
@@ -143,7 +143,9 @@ const App: React.FC = () => {
                     onLoadUsers={lazyLoaders.loadUsers}
                     currentLanguage={currentLanguage}
 
-                    onSendSms={() => {}} onApprovePlan={() => {}} 
+                    onSendSms={() => {}} 
+                    // Connected to real actions provided by useAppData
+                    onApprovePlan={actions.approvePaymentPlan} 
                     onAddMarket={actions.createMarket} 
                     onUpdateMarket={actions.updateMarket} 
                     onDeleteMarket={actions.deleteMarket} 
