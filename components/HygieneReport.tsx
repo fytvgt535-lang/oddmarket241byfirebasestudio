@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Camera, MapPin, Send, Trash2, Droplets, Bug, Construction, EyeOff, Eye, Mic } from 'lucide-react';
+import { Camera, MapPin, Send, Trash2, Droplets, Bug, Construction, EyeOff, Eye } from 'lucide-react';
 import { HygieneReport, Language } from '../types';
 import { t } from '../services/translations';
 
@@ -14,30 +14,19 @@ const HygieneReportForm: React.FC<HygieneReportProps> = ({ onSubmit, language })
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('Allée Principale');
   const [isAnonymous, setIsAnonymous] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [hasAudio, setHasAudio] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ category, description, location, isAnonymous, hasAudio });
+    if (!description.trim()) return;
+    onSubmit({ category, description, location, isAnonymous });
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);
       setDescription('');
       setCategory('waste');
       setIsAnonymous(false);
-      setHasAudio(false);
     }, 3000);
-  };
-
-  const handleVoiceRecord = () => {
-    if (isRecording) {
-      setIsRecording(false);
-      setHasAudio(true); // Simulate successful recording
-    } else {
-      setIsRecording(true);
-    }
   };
 
   if (submitted) {
@@ -103,33 +92,17 @@ const HygieneReportForm: React.FC<HygieneReportProps> = ({ onSubmit, language })
           </div>
         </div>
 
-        {/* Voice Recording Section */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Description / Vocal</label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleVoiceRecord}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border transition-all
-                ${isRecording ? 'bg-red-50 border-red-500 text-red-600 animate-pulse' : 
-                  hasAudio ? 'bg-green-50 border-green-500 text-green-700' : 'bg-gray-50 border-gray-300 text-gray-600'}
-              `}
-            >
-              <Mic className="w-5 h-5" />
-              {isRecording ? "Enregistrement..." : hasAudio ? "Message enregistré" : t(language, 'voice_record')}
-            </button>
-          </div>
-          {!hasAudio && !isRecording && (
-             <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ou écrire ici..."
-              className="w-full mt-2 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-20 resize-none text-sm"
-            />
-          )}
+          <label className="block text-sm font-medium text-gray-700 mb-2">Description précise</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Décrivez le problème constaté..."
+            required
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-32 resize-none text-sm"
+          />
         </div>
 
-        {/* Anonymity Toggle */}
         <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
           <button
             type="button"

@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { Stall, Market, Transaction, VendorProfile, Sanction, PredictiveInsight } from "../types";
+import { GoogleGenAI, Type } from "@google/genai";
+import { Stall, Market, Transaction, Sanction, PredictiveInsight } from "../types";
 
 export interface StrategicAudit {
     diagnostic: string;
@@ -21,42 +21,6 @@ export interface PatrolRecommendation {
 }
 
 const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-/**
- * Génère une quittance vocale pour les commerçants (Accessibilité & Inclusion)
- */
-export const generateAudioReceipt = async (amount: number, vendorName: string): Promise<Uint8Array | null> => {
-  try {
-    const ai = getAi();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `Confirmation de paiement. Le montant de ${amount} francs CFA a été reçu avec succès pour le compte de ${vendorName}. Marché Connect vous remercie.` }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
-          },
-        },
-      },
-    });
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (base64Audio) {
-      const binaryString = atob(base64Audio);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      return bytes;
-    }
-    return null;
-  } catch (error) {
-    console.error("TTS Error:", error);
-    return null;
-  }
-};
 
 /**
  * Suggère un itinéraire de patrouille optimisé pour l'agent (Efficacité terrain)

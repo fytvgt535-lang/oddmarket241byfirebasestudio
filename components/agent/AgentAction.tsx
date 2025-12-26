@@ -1,11 +1,11 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Stall, Sanction, Transaction, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
-import { QrCode, Sun, Moon, ChevronLeft, Volume2, Smartphone, Loader2, CheckCircle2, MessageCircle, ArrowRight, RotateCcw } from 'lucide-react';
-import { generateAudioReceipt } from '../../services/geminiService';
+import { Sun, Moon, ChevronLeft, Smartphone, CheckCircle2, MessageCircle, RotateCcw, AlertOctagon, X } from 'lucide-react';
 import { formatCurrency } from '../../utils/coreUtils';
+import { voidTransactionWithNotification } from '../../services/supabaseService';
 import toast from 'react-hot-toast';
 
 interface AgentActionProps {
@@ -19,12 +19,12 @@ interface AgentActionProps {
 }
 
 const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSuccess, currentUser }) => {
-  const [step, setStep] = useState<'handshake' | 'form' | 'success'>('handshake');
+  const [step, setStep] = useState<'form' | 'success' | 'void_confirm'>('form');
   const [amount, setAmount] = useState<number>(0); 
-  const [isSolaris, setIsSolaris] = useState(false); // Mode haute visibilité pour extérieur (Soleil)
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSolaris, setIsSolaris] = useState(false);
   const [successData, setSuccessData] = useState<any>(null);
-  const [undoCountdown, setUndoCountdown] = useState<number>(0);
+  const [voidReason, setVoidReason] = useState('');
+  const [isVoiding, setIsVoiding] = useState(false);
 
   const containerClass = isSolaris 
     ? "bg-white text-black font-black" 
@@ -32,86 +32,94 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSucc
 
   const handleValidate = () => {
       const payload = { 
+          id: `TX-${Date.now()}`,
           amount, 
           date: Date.now(), 
           ref: `GAB-${Date.now().toString().slice(-6)}`,
-          status: 'confirmed'
+          status: 'completed',
+          stallNumber: stall.number,
+          provider: 'cash'
       };
       setSuccessData(payload);
       setStep('success');
-      setUndoCountdown(7); // Sécurité anti-erreur : 7 secondes pour annuler
       if (navigator.vibrate) navigator.vibrate([100, 30, 100]);
   };
 
-  const shareReceiptWhatsApp = () => {
-      if (!successData) return;
-      const msg = `🧾 *RECU MARCHECONNECT GABON*\n--------------------------\nRef: #${successData.ref}\nClient: ${stall.occupantName}\nÉtal: ${stall.number}\nMarché: ${stall.marketId}\n*MONTANT: ${formatCurrency(successData.amount)}*\nDate: ${new Date(successData.date).toLocaleString()}\n--------------------------\n_Certifié par l'Agent ${currentUser.name}_`;
-      const url = `https://wa.me/${stall.occupantPhone?.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-      window.open(url, '_blank');
+  const handleVoidTransaction = async () => {
+      if (!voidReason) return toast.error("Motif d'annulation requis");
+      setIsVoiding(true);
+      try {
+          await voidTransactionWithNotification(successData.id, currentUser.id);
+          toast.success("Transaction annulée. Vendeur notifié.");
+          onCancel();
+      } catch (e) {
+          toast.error("Erreur lors de l'annulation");
+      } finally {
+          setIsVoiding(false);
+      }
   };
 
-  const playVoiceReceipt = async () => {
-    if (!successData || isSpeaking) return;
-    setIsSpeaking(true);
-    const audioBytes = await generateAudioReceipt(successData.amount, stall.occupantName || 'le commerçant');
-    if (audioBytes) {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      const buffer = ctx.createBuffer(1, audioBytes.length / 2, 24000);
-      const data = buffer.getChannelData(0);
-      const int16 = new Int16Array(audioBytes.buffer);
-      for (let i = 0; i < data.length; i++) data[i] = int16[i] / 32768.0;
-      
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.onended = () => setIsSpeaking(false);
-      source.start();
-    } else {
-      setIsSpeaking(false);
-      toast.error("Vocal indisponible");
-    }
-  };
+  if (step === 'void_confirm') {
+      return (
+          <div className="fixed inset-0 z-[150] bg-red-600 p-8 flex flex-col text-white animate-fade-in">
+              <div className="flex-1 flex flex-col justify-center space-y-6">
+                  <AlertOctagon className="w-20 h-20 mx-auto animate-bounce"/>
+                  <h3 className="text-3xl font-black text-center uppercase leading-none">Annuler l'Encaissement ?</h3>
+                  <p className="text-center font-bold text-red-100 italic">"Une notification d'alerte sera envoyée sur le terminal du vendeur pour prévenir toute fraude."</p>
+                  
+                  <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest opacity-70">Justification Obligatoire</label>
+                      <textarea 
+                        value={voidReason}
+                        onChange={e => setVoidReason(e.target.value)}
+                        placeholder="Ex: Erreur de montant, Doublon..."
+                        className="w-full p-4 bg-white/10 border-2 border-white/20 rounded-2xl text-white placeholder:text-white/40 font-bold outline-none focus:border-white"
+                      />
+                  </div>
+              </div>
+              <div className="space-y-3">
+                  <Button 
+                    isLoading={isVoiding}
+                    className="w-full h-20 bg-white text-red-600 font-black rounded-3xl"
+                    onClick={handleVoidTransaction}
+                  >
+                      CONFIRMER L'ANNULATION
+                  </Button>
+                  <button onClick={() => setStep('success')} className="w-full py-4 font-black uppercase text-xs">Retour</button>
+              </div>
+          </div>
+      );
+  }
 
   if (step === 'success') {
       return (
-          <div className={`fixed inset-0 z-[110] ${undoCountdown > 0 ? 'bg-amber-600' : 'bg-green-600'} flex flex-col p-6 animate-fade-in text-white transition-colors duration-500`}>
+          <div className={`fixed inset-0 z-[110] bg-green-600 flex flex-col p-6 animate-fade-in text-white`}>
               <div className="flex-1 flex flex-col items-center justify-center text-center space-y-10">
-                  {undoCountdown > 0 ? (
-                      <div className="w-32 h-32 border-8 border-white/20 rounded-full flex items-center justify-center text-5xl font-black">{undoCountdown}</div>
-                  ) : (
-                      <CheckCircle2 className="w-32 h-32 animate-scale-in"/>
-                  )}
-                  <div className="w-full bg-white text-slate-900 rounded-[3rem] p-8 shadow-2xl">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confirmation Finale</p>
-                      <p className="text-5xl font-black tracking-tighter">{formatCurrency(successData.amount)}</p>
-                      
-                      <div className="grid grid-cols-2 gap-3 mt-6">
-                        <button 
-                          onClick={playVoiceReceipt}
-                          disabled={isSpeaking}
-                          className="py-4 bg-blue-50 text-blue-600 rounded-2xl font-black flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
-                        >
-                          {isSpeaking ? <Loader2 className="animate-spin w-5 h-5"/> : <Volume2 className="w-5 h-5"/>}
-                          <span className="text-[10px] uppercase">Vocal</span>
-                        </button>
-                        <button 
-                          onClick={shareReceiptWhatsApp}
-                          className="py-4 bg-green-50 text-green-600 rounded-2xl font-black flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
-                        >
-                          <MessageCircle className="w-5 h-5"/>
-                          <span className="text-[10px] uppercase">WhatsApp</span>
-                        </button>
+                  <div className="w-32 h-32 bg-white/10 rounded-full flex items-center justify-center border-4 border-white/20">
+                      <CheckCircle2 className="w-20 h-20 animate-scale-in"/>
+                  </div>
+                  <div className="w-full bg-white text-slate-900 rounded-[3.5rem] p-10 shadow-2xl relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-2 bg-green-500"></div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Encaissement Certifié</p>
+                      <p className="text-6xl font-black tracking-tighter mb-4">{formatCurrency(successData.amount)}</p>
+                      <div className="bg-slate-50 p-4 rounded-2xl mb-6">
+                          <p className="text-[10px] font-black text-slate-400 uppercase">Code de secours (Contrôle)</p>
+                          <p className="text-2xl font-mono font-black text-slate-800 tracking-[0.3em]">{successData.ref}</p>
                       </div>
+                      
+                      <button 
+                        onClick={() => window.open(`https://wa.me/${stall.occupantPhone?.replace(/\D/g, '')}?text=RECU+GABON`)}
+                        className="w-full py-5 bg-green-600 text-white rounded-2xl font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg"
+                      >
+                        <MessageCircle className="w-6 h-6"/> WhatsApp
+                      </button>
                   </div>
               </div>
-              <div className="space-y-4 pb-8">
-                  {undoCountdown > 0 ? (
-                      <button onClick={() => setStep('form')} className="w-full h-24 bg-white text-amber-700 rounded-[2.5rem] font-black uppercase text-xl shadow-2xl flex items-center justify-center gap-3">
-                        <RotateCcw className="w-6 h-6"/> ANNULER
-                      </button>
-                  ) : (
-                      <button onClick={() => onSuccess(successData)} className="w-full h-20 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-[0.2em]">NOUVELLE OPERATION</button>
-                  )}
+              <div className="grid grid-cols-2 gap-4 pb-8">
+                  <button onClick={() => setStep('void_confirm')} className="h-20 bg-black/20 rounded-3xl font-black uppercase text-[10px] flex items-center justify-center gap-2 border border-white/10">
+                    <RotateCcw className="w-4 h-4"/> Erreur Saisie
+                  </button>
+                  <button onClick={() => onSuccess(successData)} className="h-20 bg-white text-green-700 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl">Terminer</button>
               </div>
           </div>
       );
@@ -122,7 +130,7 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSucc
         <div className="flex justify-between items-center mb-6 shrink-0">
             <button onClick={onCancel} className={`p-4 rounded-2xl ${isSolaris ? 'bg-black text-white' : 'bg-slate-100 text-black'}`}><ChevronLeft/></button>
             <div className="text-center">
-                <h3 className="font-black text-2xl tracking-tighter uppercase">{mode === 'collect' ? 'Encaissement' : 'Sanction'}</h3>
+                <h3 className="font-black text-2xl tracking-tighter uppercase">{mode === 'collect' ? 'Collecte' : 'Sanction'}</h3>
                 <p className="text-[10px] font-black uppercase opacity-60">Étal {stall.number} • {stall.occupantName}</p>
             </div>
             <button onClick={() => setIsSolaris(!isSolaris)} className={`p-4 rounded-2xl border-4 ${isSolaris ? 'border-black' : 'border-white/10'}`}>
@@ -134,6 +142,7 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSucc
             <div className={`p-10 rounded-[3rem] ${isSolaris ? 'bg-white border-8 border-black' : 'bg-white/5 border-2 border-white/10'}`}>
                 <input 
                     type="number" 
+                    inputMode="numeric"
                     value={amount || ''} 
                     onChange={e => setAmount(Number(e.target.value))} 
                     className="w-full text-7xl font-black bg-transparent border-none outline-none text-center" 
@@ -155,7 +164,7 @@ const AgentAction: React.FC<AgentActionProps> = ({ stall, mode, onCancel, onSucc
             >
                 VALIDER
             </Button>
-            <button onClick={onCancel} className="w-full py-4 font-black text-slate-400 uppercase tracking-widest text-[10px]">Abandonner la saisie</button>
+            <button onClick={onCancel} className="w-full py-4 font-black text-slate-400 uppercase tracking-widest text-[10px]">Annuler et sortir</button>
         </div>
     </div>
   );

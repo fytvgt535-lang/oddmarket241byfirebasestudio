@@ -33,12 +33,11 @@ export const useAppData = (session: any, currentUser: User | null) => {
     const refresh = useCallback(async () => {
         if (!session || !currentUser) return;
         try {
-            const [markets, stallsResult, transResult, plans, sanctions] = await Promise.all([
+            const [markets, stallsResult, transResult, orders] = await Promise.all([
                 SupabaseService.fetchMarkets(),
                 SupabaseService.fetchStalls({ limit: 200 }),
                 SupabaseService.fetchTransactions(1, 100),
-                SupabaseService.fetchPaymentPlans(),
-                Promise.resolve(data.sanctions) 
+                SupabaseService.fetchOrders(currentUser.role === 'vendor' ? { stallId: currentUser.id } : { customerId: currentUser.id })
             ]);
 
             setData(prev => ({
@@ -46,13 +45,12 @@ export const useAppData = (session: any, currentUser: User | null) => {
                 markets,
                 stalls: stallsResult.data,
                 recentTransactions: transResult.transactions,
-                paymentPlans: plans,
-                sanctions: sanctions as Sanction[]
+                orders: orders
             }));
         } catch (e) {
             console.error("Refresh failed", e);
         }
-    }, [session, currentUser, data.sanctions]);
+    }, [session, currentUser]);
 
     useEffect(() => {
         const init = async () => {
@@ -72,19 +70,20 @@ export const useAppData = (session: any, currentUser: User | null) => {
         };
         init();
 
+        // REALTIME CHANNELS
         if (session) {
-            const channel = supabase.channel('realtime_transactions')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, (payload) => {
-                    // Correction critique : On mappe les données brutes Postgres (SnakeCase) en Transaction (CamelCase)
-                    const newTx = SupabaseService.mapTransaction(payload.new);
-                    setData(prev => ({
-                        ...prev,
-                        recentTransactions: [newTx, ...prev.recentTransactions].slice(0, 100)
-                    }));
-                })
-                .subscribe();
+            const txSub = SupabaseService.subscribeToTable('transactions', (p) => {
+                if (p.eventType === 'INSERT') {
+                    const newTx = SupabaseService.mapTransaction(p.new);
+                    setData(prev => ({ ...prev, recentTransactions: [newTx, ...prev.recentTransactions].slice(0, 100) }));
+                }
+            });
+
+            const orderSub = SupabaseService.subscribeToTable('orders', (p) => {
+                refresh(); // Simple refresh for orders to keep logic robust
+            });
             
-            return () => { channel.unsubscribe(); };
+            return () => { txSub.unsubscribe(); orderSub.unsubscribe(); };
         }
     }, [session, currentUser?.id, refresh]);
 
@@ -101,36 +100,26 @@ export const useAppData = (session: any, currentUser: User | null) => {
             }
         },
 
-        createMarket: (d: any) => actions.wrap(() => SupabaseService.createMarket(d), "Marché créé"),
-        updateMarket: (id: string, d: any) => actions.wrap(() => SupabaseService.updateMarket(id, d), "Mise à jour effectuée"),
+        // Fix: Added missing admin actions
+        approvePaymentPlan: (id: string) => actions.wrap(() => SupabaseService.approvePaymentPlan(id), "Plan approuvé"),
+        createMarket: (m: any) => actions.wrap(() => SupabaseService.createMarket(m), "Marché créé"),
+        updateMarket: (id: string, u: any) => actions.wrap(() => SupabaseService.updateMarket(id, u), "Marché mis à jour"),
         deleteMarket: (id: string) => actions.wrap(() => SupabaseService.deleteMarket(id), "Marché supprimé"),
-        createStall: (d: any) => actions.wrap(() => SupabaseService.createStall(d), "Étal ajouté"),
+        createStall: (s: any) => actions.wrap(() => SupabaseService.createStall(s), "Étal créé"),
+        bulkCreateStalls: (s: any[]) => actions.wrap(() => SupabaseService.bulkCreateStalls(s), "Étals créés"),
         deleteStall: (id: string) => actions.wrap(() => SupabaseService.deleteStall(id), "Étal supprimé"),
-        bulkCreateStalls: (stalls: any[]) => actions.wrap(() => SupabaseService.createBulkStalls(stalls), "Série d'étals créée"),
-        createProduct: (d: any) => actions.wrap(() => SupabaseService.createProduct(d), "Produit ajouté"),
-        updateProduct: (id: string, d: any) => actions.wrap(() => SupabaseService.updateProduct(id, d), "Stock mis à jour"),
-        deleteProduct: (id: string) => actions.wrap(() => SupabaseService.deleteProduct(id), "Produit retiré"),
-        createTransaction: (d: any) => actions.wrap(() => SupabaseService.createTransaction(d), "Paiement enregistré"),
-        createSanction: (d: any) => actions.wrap(() => SupabaseService.createSanction(d), "Sanction émise"),
-        createExpense: (d: any) => actions.wrap(() => SupabaseService.createExpense(d), "Dépense enregistrée"),
+        createExpense: (e: any) => actions.wrap(() => SupabaseService.createExpense(e), "Dépense ajoutée"),
         deleteExpense: (id: string) => actions.wrap(() => SupabaseService.deleteExpense(id), "Dépense supprimée"),
-        updateUserStatus: (id: string, d: any) => actions.wrap(() => SupabaseService.adminUpdateUserStatus(id, d), "Statut citoyen modifié"),
-        updateOrderStatus: (id: string, s: string) => actions.wrap(() => SupabaseService.updateOrderStatus(id, s), "Commande mise à jour"),
-        createOrder: (d: any) => actions.wrap(() => SupabaseService.createOrder(d), "Commande confirmée"),
-        updateMissionStatus: (id: string, s: string, r?: string) => actions.wrap(() => SupabaseService.updateMissionStatus(id, s, r), "Mission mise à jour"),
-        approvePaymentPlan: (id: string) => actions.wrap(() => SupabaseService.updatePaymentPlanStatus(id, 'active'), "Plan approuvé"),
-        requestPaymentPlan: (d: any) => actions.wrap(() => SupabaseService.createPaymentPlan(d), "Demande d'échéancier envoyée"),
-        assignMission: (mission: any) => actions.wrap(() => SupabaseService.createMission(mission), "Mission assignée"),
-        validateCashDrop: (agentId: string, amount: number) => actions.wrap(() => SupabaseService.validateAgentDeposit(agentId, amount), "Dépôt validé"),
-        createCategory: (cat: any) => {
-            setData(prev => ({ ...prev, productCategories: [...prev.productCategories, { ...cat, id: Math.random().toString(36).substr(2, 9) }] }));
-            toast.success("Catégorie ajoutée");
-        },
-        deleteCategory: (id: string) => {
-            setData(prev => ({ ...prev, productCategories: prev.productCategories.filter(c => c.id !== id) }));
-            toast.success("Catégorie supprimée");
-        }
+        updateUserStatus: (id: string, u: any) => actions.wrap(() => SupabaseService.adminUpdateUserStatus(id, u), "Statut mis à jour"),
+        
+        // Fix: Added missing product/order actions
+        updateProduct: (id: string, u: any) => actions.wrap(() => SupabaseService.updateProduct(id, u), "Produit mis à jour"),
+        deleteProduct: (id: string) => actions.wrap(() => SupabaseService.deleteProduct(id), "Produit supprimé"),
+        updateOrderStatus: (id: string, s: string) => actions.wrap(() => SupabaseService.updateOrderStatus(id, s), "Statut mis à jour"),
+        createOrder: (d: any) => actions.wrap(() => SupabaseService.createOrder(d), "Commande envoyée au vendeur"),
+        createProduct: (d: any) => actions.wrap(() => SupabaseService.createProduct(d), "Produit ajouté"),
+        updateMissionStatus: (id: string, s: string) => actions.wrap(() => SupabaseService.updateMissionStatus(id, s), "Mission mise à jour")
     };
 
-    return { isDataLoading, loadingStates, lazyLoaders: { loadFinance: refresh, loadUsers: refresh, loadMissions: refresh }, data, actions };
+    return { isDataLoading, loadingStates, data, actions, lazyLoaders: { loadFinance: refresh, loadUsers: refresh, loadMissions: refresh } };
 };

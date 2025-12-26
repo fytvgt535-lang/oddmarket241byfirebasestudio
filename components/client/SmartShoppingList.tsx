@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sparkles, History, Clock, Trash2, Mic, MicOff, Check, RefreshCw, X, ShoppingCart, Store } from 'lucide-react';
+import { Sparkles, History, Clock, Trash2, Check, RefreshCw, X, ShoppingCart, Store } from 'lucide-react';
 import { SmartListItem, SmartListHistory } from '../../types';
 import { parseShoppingListText } from '../../utils/smartShopperEngine';
 import { syncShopperData } from '../../services/localShopperDatabase'; 
@@ -20,7 +20,6 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [history, setHistory] = useState<SmartListHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
       syncShopperData().catch(console.error);
@@ -103,14 +102,6 @@ export const SmartShoppingList: React.FC<SmartShoppingListProps> = ({ onValidate
                         onChange={e => setInputText(e.target.value)}
                         className="bg-transparent border-none text-white placeholder:text-slate-500 focus:ring-0 h-40 text-xl font-bold leading-relaxed"
                     />
-                    <div className="absolute bottom-4 right-4">
-                        <button 
-                            onClick={() => setIsListening(!isListening)} 
-                            className={`p-4 rounded-full transition-all ${isListening ? 'bg-red-500 animate-pulse text-white shadow-red-500/50 shadow-lg' : 'bg-white text-slate-900 hover:scale-110'}`}
-                        >
-                            {isListening ? <MicOff className="w-6 h-6"/> : <Mic className="w-6 h-6"/>}
-                        </button>
-                    </div>
                 </div>
                 
                 <div className="mt-8 relative z-10">

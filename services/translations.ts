@@ -52,7 +52,6 @@ export const translations = {
     // Spécifiques
     reserve_stall: "Réserver un étal",
     priority_request: "Demande de Priorité (PMR/Enceinte)",
-    voice_record: "Enregistrer un signalement vocal",
     anonymous: "Signalement Anonyme",
     waste: "Gestion des Déchets",
     water: "Eaux Usées / Fuites",
@@ -103,7 +102,6 @@ export const translations = {
     
     reserve_stall: "Reserve a Stall",
     priority_request: "Priority Request",
-    voice_record: "Voice Report",
     anonymous: "Anonymous Reporting",
     waste: "Waste Management",
     water: "Waste Water / Leaks",

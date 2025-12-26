@@ -43,6 +43,8 @@ export interface VendorProfile extends User {
     bio?: string;
     isLogisticsSubscribed?: boolean;
     hygieneScore: number;
+    averageRating?: number;
+    totalReviews?: number;
     subscriptionPlan: 'free' | 'standard' | 'premium';
 }
 
@@ -77,6 +79,7 @@ export interface Stall {
     healthStatus: 'healthy' | 'critical';
     complianceScore: number;
     surfaceArea?: number;
+    coordinates?: { lat: number; lng: number };
 }
 
 export interface Product {
@@ -106,7 +109,7 @@ export interface Transaction {
     stallId?: string;
     stallNumber?: string;
     reference: string;
-    status: 'pending' | 'completed';
+    status: 'pending' | 'completed' | 'cancelled';
     collectedBy?: string;
     collectedByName?: string;
     nonce?: number;
@@ -137,7 +140,6 @@ export interface HygieneReport {
     timestamp: number;
     status: 'new' | 'investigating' | 'resolved';
     isAnonymous: boolean;
-    hasAudio: boolean;
 }
 
 export interface Agent extends User {}
@@ -319,6 +321,18 @@ export interface ClientOrder {
     paymentProvider: PaymentProvider;
     paymentRef: string;
     deliveryMode: 'pickup' | 'delivery';
+    rating?: number;
+    reviewComment?: string;
+}
+
+export interface OrderMessage {
+    id: string;
+    orderId: string;
+    senderId: string;
+    senderRole: 'vendor' | 'client';
+    text: string;
+    timestamp: number;
+    photoUrl?: string;
 }
 
 export interface VendorDashboardProps {
