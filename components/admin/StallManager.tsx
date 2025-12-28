@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS stalls (
   "marketId" UUID REFERENCES markets(id), 
   number TEXT, zone TEXT, status TEXT, price NUMERIC, "productType" TEXT,
   "occupantId" UUID, "occupantName" TEXT, "occupantPhone" TEXT,
-  "healthStatus" TEXT DEFAULT 'healthy', "complianceScore" NUMERIC DEFAULT 100
+  "healthStatus" TEXT DEFAULT 'healthy', "complianceScore" NUMERIC DEFAULT 100,
+  "lastPaymentDate" BIGINT
 );
 
 -- 3. Profils (Link avec Supabase Auth)
@@ -98,7 +99,33 @@ CREATE TABLE IF NOT EXISTS products (
   tags TEXT[]
 );
 
--- 5. Sécurité (RLS) - Permissive pour le prototype
+-- 5. FONCTIONS SÉCURISÉES (RPC) -- INDISPENSABLES --
+-- Cette fonction permet d'insérer une transaction de manière atomique et sécurisée
+CREATE OR REPLACE FUNCTION process_payment(p_market_id UUID, p_stall_id UUID, p_amount NUMERIC, p_type TEXT, p_provider TEXT, p_ref TEXT)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+DECLARE
+  v_tx_id UUID;
+BEGIN
+  INSERT INTO transactions ("marketId", "stallId", amount, type, provider, reference, status, date)
+  VALUES (p_market_id, p_stall_id, p_amount, p_type, p_provider, p_ref, 'completed', extract(epoch from now()) * 1000)
+  RETURNING id INTO v_tx_id;
+  
+  -- Mettre à jour la date de dernier paiement de l'étal
+  UPDATE stalls SET "lastPaymentDate" = extract(epoch from now()) * 1000 WHERE id = p_stall_id;
+  
+  RETURN jsonb_build_object('txId', v_tx_id, 'status', 'success');
+END;
+$$;
+
+-- Cette fonction permet à un admin de modifier les rôles (bypass RLS standard)
+CREATE OR REPLACE FUNCTION admin_manage_role(target_user_id UUID, new_role TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE profiles SET role = new_role WHERE id = target_user_id;
+END;
+$$;
+
+-- 6. Sécurité (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE markets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stalls ENABLE ROW LEVEL SECURITY;
@@ -109,6 +136,7 @@ ALTER TABLE sanctions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 
+-- Politiques Permissives pour le Prototype (À durcir en Prod)
 CREATE POLICY "Public Read" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Self Update" ON profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Public Read Markets" ON markets FOR SELECT USING (true);
@@ -123,7 +151,13 @@ CREATE POLICY "Public Audit" ON audit_logs FOR ALL USING (true);
 CREATE POLICY "Public Products" ON products FOR ALL USING (true);
       `;
       console.log(sql);
-      alert("Le script SQL COMPLET a été généré dans la Console F12. Copiez-le dans Supabase !");
+      if (navigator.clipboard) {
+          navigator.clipboard.writeText(sql).then(() => {
+              toast.success("Script SQL complet copié ! Exécutez-le dans Supabase.");
+          });
+      } else {
+          alert("Le script SQL est dans la console (F12).");
+      }
   };
 
   return (
@@ -135,7 +169,7 @@ CREATE POLICY "Public Products" ON products FOR ALL USING (true);
             </div>
             <div className="flex gap-2">
                 <Button variant="outline" onClick={handleSetupGuide} className="border-orange-200 text-orange-700 flex gap-2">
-                    <Database className="w-4 h-4"/> Configurer SQL
+                    <Database className="w-4 h-4"/> Réparer BDD
                 </Button>
                 <Button onClick={() => setIsCreateOpen(true)} className="bg-orange-600 border-none shadow-orange-200">Nouveau</Button>
             </div>

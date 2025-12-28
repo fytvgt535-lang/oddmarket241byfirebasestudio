@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Activity, Building2, Users, LayoutGrid, DollarSign, Shield, Radio, Zap, Gavel, Search, Bell, Map as MapIcon, MessageSquare, Target } from 'lucide-react';
+import { Activity, Building2, Users, LayoutGrid, DollarSign, Shield, Radio, Zap, Gavel, Search, Bell, Map as MapIcon, MessageSquare, Target, AlertOctagon, Database, Copy, Play } from 'lucide-react';
 import { Stall, HygieneReport, Transaction, Market, Agent, Expense, PaymentPlan, Receipt, AppNotification, Sanction, User, ClientOrder, Mission, ProductCategory } from '../types';
 import MarketManager from './admin/MarketManager';
 import StallManager from './admin/StallManager';
@@ -11,12 +11,20 @@ import AgentManager from './admin/AgentManager';
 import SettingsManager from './admin/SettingsManager';
 import LegalCenter from './admin/LegalCenter';
 import ChaosCenter from './admin/ChaosCenter';
-import WarRoom from './admin/WarRoom'; // NEW
+import WarRoom from './admin/WarRoom'; 
 import { formatCurrency } from '../utils/coreUtils';
 import { Card } from './ui/Card';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
+import { supabase } from '../supabaseClient';
+import { seedDatabase } from '../services/supabaseService';
+import toast from 'react-hot-toast';
+
+// Defined BEFORE usage to ensure availability
+const Rocket = ({ className }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
+);
 
 interface AdminDashboardProps {
   markets: Market[];
@@ -33,6 +41,8 @@ interface AdminDashboardProps {
   orders?: ClientOrder[];
   missions?: Mission[];
   productCategories?: ProductCategory[];
+  // Fix: Added missing prop definition
+  financialStats?: any; 
   loadingStates?: { finance: boolean; users: boolean; products: boolean; orders: boolean; missions?: boolean };
   onLoadFinance?: () => void;
   onLoadUsers?: () => void;
@@ -52,17 +62,55 @@ interface AdminDashboardProps {
   onAddCategory?: (cat: Omit<ProductCategory, 'id'>) => void;
   onDeleteCategory?: (id: string) => void;
   currentLanguage: string;
+  onSendSms: () => void;
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'finance' | 'space' | 'markets' | 'users' | 'agents' | 'audit' | 'chaos' | 'legal'>('overview');
   const [globalSearch, setGlobalSearch] = useState('');
+  const [dbStatus, setDbStatus] = useState<'checking' | 'ok' | 'missing_tables'>('checking');
+  const [isSeeding, setIsSeeding] = useState(false);
 
   useEffect(() => {
       if (activeTab === 'finance' || activeTab === 'overview') props.onLoadFinance?.();
       if (['users', 'audit', 'agents', 'space'].includes(activeTab)) props.onLoadUsers?.();
       if (activeTab === 'agents') props.onLoadMissions?.();
   }, [activeTab]);
+
+  // VÉRIFICATION DE SANTÉ DE LA BDD
+  useEffect(() => {
+      const checkDb = async () => {
+          try {
+              const { error } = await supabase.from('markets').select('id').limit(1);
+              if (error && error.code === '42P01') { 
+                  setDbStatus('missing_tables');
+              } else {
+                  setDbStatus('ok');
+              }
+          } catch (e) {
+              setDbStatus('missing_tables');
+          }
+      };
+      checkDb();
+  }, []);
+
+  const handleSeed = async () => {
+      setIsSeeding(true);
+      const success = await seedDatabase();
+      setIsSeeding(false);
+      if (success) {
+          toast.success("Données de démo installées ! Actualisez la page.");
+          setTimeout(() => window.location.reload(), 1500);
+      } else {
+          toast.error("Erreur lors de l'initialisation.");
+      }
+  };
+
+  const handleCopySQL = () => {
+      // Le code SQL est généré dans StallManager pour centralisation
+      toast("Veuillez utiliser l'outil 'Réparer BDD' dans le menu Marchés pour obtenir le script SQL complet.", { icon: 'ℹ️' });
+      setActiveTab('space');
+  };
 
   const stats = [
       { label: "Collecte Globale", val: "1.2M F", icon: DollarSign, color: "text-green-600", bg: "bg-green-50" },
@@ -73,6 +121,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
 
   return (
     <div className="space-y-6 animate-fade-in pb-20">
+      
+      {/* ALERTE CRITIQUE BDD */}
+      {dbStatus === 'missing_tables' && (
+          <div className="bg-red-600 text-white p-6 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-4 border-white/20 animate-pulse">
+              <div className="flex items-center gap-4">
+                  <div className="p-4 bg-white/20 rounded-2xl"><Database className="w-8 h-8 text-white"/></div>
+                  <div>
+                      <h3 className="text-2xl font-black uppercase tracking-tighter">Base de données vide !</h3>
+                      <p className="font-medium opacity-90 max-w-lg">L'application ne peut pas fonctionner sans ses tables. Exécutez le script SQL d'initialisation.</p>
+                  </div>
+              </div>
+              <Button onClick={() => setActiveTab('space')} className="bg-white text-red-600 font-black h-16 px-8 rounded-2xl shadow-xl hover:bg-gray-100 flex items-center gap-2">
+                  <Copy className="w-5 h-5"/> ALLER VERS L'OUTIL SQL
+              </Button>
+          </div>
+      )}
+
+      {/* SETUP RAPIDE (SEED) - Uniquement si BDD ok mais vide */}
+      {dbStatus === 'ok' && props.markets.length === 0 && (
+          <div className="bg-blue-600 text-white p-6 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-4 border-white/20">
+              <div className="flex items-center gap-4">
+                  <div className="p-4 bg-white/20 rounded-2xl"><Rocket className="w-8 h-8 text-white"/></div>
+                  <div>
+                      <h3 className="text-2xl font-black uppercase tracking-tighter">Application Vide</h3>
+                      <p className="font-medium opacity-90 max-w-lg">Aucun marché détecté. Voulez-vous installer les données de démonstration (Marché Mont-Bouët, Étals, Vendeurs) ?</p>
+                  </div>
+              </div>
+              <Button onClick={handleSeed} isLoading={isSeeding} className="bg-white text-blue-600 font-black h-16 px-8 rounded-2xl shadow-xl hover:bg-gray-100 flex items-center gap-2 uppercase tracking-widest">
+                  <Play className="w-5 h-5"/> Lancer la Démo
+              </Button>
+          </div>
+      )}
+
       {/* HEADER COMMAND CENTER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
         <div className="flex items-center gap-4">
@@ -181,7 +262,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
                               <div className="space-y-4">
                                   <div className="flex justify-between items-center text-xs">
                                       <span className="text-slate-400 font-bold">Base Supabase</span> 
-                                      <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Opérationnel</Badge>
+                                      <Badge className={`${dbStatus === 'ok' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'} border-transparent`}>{dbStatus === 'ok' ? 'Opérationnel' : 'Erreur'}</Badge>
                                   </div>
                                   <div className="flex justify-between items-center text-xs">
                                       <span className="text-slate-400 font-bold">Nœuds Offline</span> 
@@ -199,7 +280,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
           )}
           
           {activeTab === 'finance' && <FinanceManager {...props} onAddExpense={props.onAddExpense!} onDeleteExpense={props.onDeleteExpense!} onApprovePlan={props.onApprovePlan} />}
-          {activeTab === 'agents' && <AgentManager {...props} users={props.users || []} markets={props.markets} stalls={props.stalls} missions={props.missions || []} onAssignMission={props.onAssignMission!} onValidateCashDrop={props.onValidateCashDrop!} />}
+          {activeTab === 'agents' && <AgentManager {...props} users={props.users || []} markets={props.markets} stalls={props.stalls} missions={props.missions || []} />}
           {activeTab === 'users' && <UserManager {...props} users={props.users || []} onUpdateUserStatus={props.onUpdateUserStatus!} />}
           {activeTab === 'space' && <StallManager {...props} users={props.users || []} categories={props.productCategories || []} onCreateStall={props.onCreateStall!} onBulkCreateStalls={props.onBulkCreateStalls!} onDeleteStall={props.onDeleteStall!} />}
           {activeTab === 'audit' && <AuditLogViewer users={props.users || []} currentLanguage={props.currentLanguage} />}

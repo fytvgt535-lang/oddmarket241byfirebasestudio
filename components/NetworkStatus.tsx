@@ -1,24 +1,30 @@
 
 import React, { useState, useEffect } from 'react';
 import { Wifi, WifiOff, RefreshCw, UploadCloud, AlertTriangle, X, List, Trash2, CheckCircle, Clock } from 'lucide-react';
-import { syncOfflineQueue, getOfflineQueueSize, getFailedQueueSize, getFailedItems, getPendingItems, retryFailedItem, discardFailedItem, removePendingItem } from '../services/supabaseService';
+import { syncOfflineQueue, fetchPendingItemsAsync, fetchFailedItemsAsync, retryFailedItem, discardFailedItem, removePendingItem } from '../services/supabaseService';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/coreUtils';
 
 const NetworkStatus: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [showOnlineToast, setShowOnlineToast] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [failedCount, setFailedCount] = useState(0);
+  const [pendingItems, setPendingItems] = useState<any[]>([]);
+  const [failedItems, setFailedItems] = useState<any[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   
   // Modal & Tabs
   const [showManager, setShowManager] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'failed'>('pending');
 
-  const updateCounts = () => {
-      setPendingCount(getOfflineQueueSize());
-      setFailedCount(getFailedQueueSize());
+  const updateCounts = async () => {
+      try {
+          const pending = await fetchPendingItemsAsync();
+          const failed = await fetchFailedItemsAsync();
+          setPendingItems(pending);
+          setFailedItems(failed);
+      } catch (e) {
+          // Silent fail if crypto not ready
+      }
   };
 
   useEffect(() => {
@@ -28,8 +34,8 @@ const NetworkStatus: React.FC = () => {
       setIsOnline(true);
       setShowOnlineToast(true);
       
-      const queueSize = getOfflineQueueSize();
-      if (queueSize > 0) {
+      const pending = await fetchPendingItemsAsync();
+      if (pending.length > 0) {
           setIsSyncing(true);
           const processed = await syncOfflineQueue();
           if (processed > 0) {
@@ -46,17 +52,14 @@ const NetworkStatus: React.FC = () => {
         updateCounts();
     };
 
-    const handleStorageChange = () => updateCounts();
-
+    // Polling toutes les 3s pour vérifier le stockage chiffré
+    const interval = setInterval(updateCounts, 3000);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    window.addEventListener('storage', handleStorageChange);
-    const interval = setInterval(updateCounts, 2000);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
   }, []);
@@ -73,82 +76,66 @@ const NetworkStatus: React.FC = () => {
       updateCounts();
   };
 
-  const handleRetry = (id: number) => {
-      retryFailedItem(id);
-      setFailedCount(prev => prev - 1);
-      setPendingCount(prev => prev + 1);
+  const handleRetry = async (id: number) => {
+      await retryFailedItem(id);
+      updateCounts();
       toast.success("Action remise en file d'attente");
   };
 
-  const handleDiscardFailed = (id: number) => {
-      discardFailedItem(id);
-      setFailedCount(prev => prev - 1);
+  const handleDiscardFailed = async (id: number) => {
+      await discardFailedItem(id);
+      updateCounts();
       toast("Action supprimée", { icon: '🗑️' });
   };
 
   const handleCancelPending = async (id: number) => {
       if (confirm("Annuler cette action avant l'envoi ?")) {
           await removePendingItem(id);
-          setPendingCount(prev => prev - 1);
+          updateCounts();
           toast("Action annulée", { icon: '🗑️' });
       }
   };
 
-  // Convert technical action names to human readable text
   const getHumanReadableAction = (action: string, payload: any) => {
       try {
           switch(action) {
               case 'createTransaction': 
                   return `Encaissement : ${formatCurrency(payload.amount)} ${payload.type === 'rent' ? '(Loyer)' : '(Autre)'}`;
-              case 'createSanction': 
-                  return `Sanction : ${formatCurrency(payload.amount)} (${payload.reason || 'Infraction'})`;
-              case 'createProduct': 
-                  return `Ajout Produit : ${payload.name}`;
-              case 'updateProduct': 
-                  return `Modif Produit : ${payload.updates?.name || 'Mise à jour'}`;
-              case 'createOrder': 
-                  return `Commande Client : ${formatCurrency(payload.totalAmount)}`;
-              case 'updateUserProfile': 
-                  return `Mise à jour Profil`;
-              case 'updateMissionStatus':
-                  return `Mission : ${payload.status === 'completed' ? 'Terminée' : payload.status}`;
-              case 'createReport':
-                  return `Signalement : ${payload.category}`;
               default: 
-                  return `${action} (Données techniques)`;
+                  return `${action}`;
           }
       } catch (e) {
           return action;
       }
   };
 
-  if (isOnline && !showOnlineToast && failedCount === 0 && pendingCount === 0) return null;
+  if (isOnline && !showOnlineToast && failedItems.length === 0 && pendingItems.length === 0) return null;
 
   return (
     <>
         <div 
             onClick={() => setShowManager(true)}
             className={`fixed bottom-4 left-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transition-all duration-300 animate-slide-up border cursor-pointer hover:scale-105 ${
-            failedCount > 0 ? 'bg-red-600 text-white border-red-500' :
-            pendingCount > 0 ? 'bg-slate-800 text-white border-slate-700' :
+            failedItems.length > 0 ? 'bg-red-600 text-white border-red-500' :
+            pendingItems.length > 0 ? 'bg-slate-800 text-white border-slate-700' :
             isOnline ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-white border-slate-700'
         }`}>
-            <div className={`p-2 rounded-full ${failedCount > 0 ? 'bg-red-500 animate-pulse' : isOnline ? 'bg-green-500' : 'bg-slate-600'}`}>
-                {failedCount > 0 ? <AlertTriangle className="w-4 h-4"/> : 
+            <div className={`p-2 rounded-full ${failedItems.length > 0 ? 'bg-red-500 animate-pulse' : isOnline ? 'bg-green-500' : 'bg-slate-600'}`}>
+                {failedItems.length > 0 ? <AlertTriangle className="w-4 h-4"/> : 
                  isSyncing ? <RefreshCw className="w-4 h-4 animate-spin"/> : 
                  isOnline ? <Wifi className="w-4 h-4"/> : <WifiOff className="w-4 h-4"/>}
             </div>
             <div>
-                {failedCount > 0 ? (
+                {failedItems.length > 0 ? (
                     <div>
-                        <p className="text-sm font-bold">Synchro Échouée ({failedCount})</p>
+                        <p className="text-sm font-bold">Synchro Échouée ({failedItems.length})</p>
                         <p className="text-xs opacity-80 underline">Voir les détails</p>
                     </div>
                 ) : (
                     <div>
-                        <p className="text-sm font-bold">{isOnline ? (isSyncing ? 'Synchronisation...' : pendingCount > 0 ? 'En Attente Envoi' : 'Connecté') : 'Mode Hors Ligne'}</p>
+                        <p className="text-sm font-bold">{isOnline ? (isSyncing ? 'Synchronisation...' : pendingItems.length > 0 ? 'En Attente Envoi' : 'Connecté') : 'Mode Hors Ligne'}</p>
                         <p className="text-xs opacity-80 flex items-center gap-1">
-                            {pendingCount > 0 ? <><UploadCloud className="w-3 h-3"/> {pendingCount} actions en attente</> : isOnline ? 'Système à jour' : 'Sauvegarde locale'}
+                            {pendingItems.length > 0 ? <><UploadCloud className="w-3 h-3"/> {pendingItems.length} actions chiffrées</> : isOnline ? 'Système à jour' : 'Sauvegarde sécurisée'}
                         </p>
                     </div>
                 )}
@@ -171,26 +158,26 @@ const NetworkStatus: React.FC = () => {
                             onClick={() => setActiveTab('pending')} 
                             className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'pending' ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500'}`}
                         >
-                            <UploadCloud className="w-4 h-4"/> En Attente ({getOfflineQueueSize()})
+                            <UploadCloud className="w-4 h-4"/> En Attente ({pendingItems.length})
                         </button>
                         <button 
                             onClick={() => setActiveTab('failed')} 
                             className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'failed' ? 'border-red-600 text-red-600 bg-red-50' : 'border-transparent text-gray-500'}`}
                         >
-                            <AlertTriangle className="w-4 h-4"/> Échecs ({getFailedQueueSize()})
+                            <AlertTriangle className="w-4 h-4"/> Échecs ({failedItems.length})
                         </button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3">
                         {activeTab === 'pending' && (
                             <>
-                                {getPendingItems().length === 0 ? (
+                                {pendingItems.length === 0 ? (
                                     <div className="text-center py-10 text-gray-400 flex flex-col items-center">
                                         <CheckCircle className="w-12 h-12 mb-2 text-green-500 opacity-50"/>
                                         <p>Tout est synchronisé.</p>
                                     </div>
                                 ) : (
-                                    getPendingItems().map(item => (
+                                    pendingItems.map(item => (
                                         <div key={item.id} className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
                                             <div>
                                                 <p className="font-bold text-sm text-gray-800">{getHumanReadableAction(item.action, item.payload)}</p>
@@ -202,10 +189,10 @@ const NetworkStatus: React.FC = () => {
                                         </div>
                                     ))
                                 )}
-                                {getPendingItems().length > 0 && isOnline && (
+                                {pendingItems.length > 0 && isOnline && (
                                     <button onClick={handleManualSync} disabled={isSyncing} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl mt-4 flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-200">
                                         {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin"/> : <UploadCloud className="w-4 h-4"/>}
-                                        Forcer l'Envoi ({getPendingItems().length})
+                                        Forcer l'Envoi
                                     </button>
                                 )}
                             </>
@@ -213,13 +200,13 @@ const NetworkStatus: React.FC = () => {
 
                         {activeTab === 'failed' && (
                             <>
-                                {getFailedItems().length === 0 ? (
+                                {failedItems.length === 0 ? (
                                     <div className="text-center py-10 text-gray-400 flex flex-col items-center">
                                         <CheckCircle className="w-12 h-12 mb-2 text-gray-300 opacity-50"/>
                                         <p>Aucune erreur critique.</p>
                                     </div>
                                 ) : (
-                                    getFailedItems().map(item => (
+                                    failedItems.map(item => (
                                         <div key={item.id} className="p-3 bg-red-50 border border-red-100 rounded-lg shadow-sm">
                                             <div className="flex justify-between mb-1">
                                                 <span className="font-bold text-sm text-gray-800">{getHumanReadableAction(item.action, item.payload)}</span>

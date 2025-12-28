@@ -3,7 +3,6 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Market, Stall, Transaction, PredictiveInsight } from '../../types';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-// Added Button import
 import { Button } from '../ui/Button';
 import { Activity, ShieldAlert, DollarSign, TrendingUp, Users, ArrowUpRight, Brain, Loader2, RefreshCw, Zap, Landmark, Bell } from 'lucide-react';
 import { formatCurrency } from '../../utils/coreUtils';
@@ -23,6 +22,7 @@ const WarRoom: React.FC<WarRoomProps> = ({ markets, stalls, transactions, report
     const [liveTicker, setLiveTicker] = useState<Transaction[]>([]);
 
     const runFullPrediction = async () => {
+        if (markets.length === 0) return;
         setIsLoadingIA(true);
         const newInsights: Record<string, PredictiveInsight[]> = {};
         for (const m of markets) {
@@ -30,6 +30,7 @@ const WarRoom: React.FC<WarRoomProps> = ({ markets, stalls, transactions, report
                 const result = await predictMarketTrends(m, transactions.filter(t => t.marketId === m.id), reports);
                 newInsights[m.id] = result;
             } catch(e) {
+                // Silent fail for UI stability
                 console.warn("Prediction failed for market", m.id);
             }
         }
